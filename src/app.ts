@@ -2,8 +2,54 @@ import helmet from '@fastify/helmet'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { z } from 'zod'
 
+import {
+  createDomainAccount,
+  deleteDomainAccount,
+  getDnsProviderDefinitions,
+  getDomainAccount,
+  listAvailableDomains,
+  listDomainAccounts,
+  updateDomainAccount,
+} from './adapters/v1051/accounts.js'
+import {
+  assignDomainCategory,
+  batchDeleteDomains,
+  batchImportDomains,
+  batchSetDomainNotice,
+  batchUpdateDomainRemark,
+  createDomain,
+  createDomainCategory,
+  deleteDomain,
+  deleteDomainCategory,
+  listDomainCategories,
+  queueDomainExpiryRefresh,
+  refreshDomainExpiry,
+  updateDomain,
+  updateDomainCategory,
+} from './adapters/v1051/domain-actions.js'
 import { getDomain, listDomains, listRecords } from './adapters/v1051/domains.js'
 import { executeLegacyOperation, listLegacyOperations } from './adapters/v1051/operations.js'
+import {
+  batchOperateRecords,
+  bulkCreateRecords,
+  checkRecord,
+  createDomainAlias,
+  createRecord,
+  deleteDomainAlias,
+  deleteRecord,
+  getRecordOptions,
+  listDomainAliases,
+  listRecordGroups,
+  listRecordLogs,
+  listWeightedRecordSets,
+  lookupRecords,
+  quickEditRecordByName,
+  setRecordRemark,
+  setRecordStatus,
+  setWeightedRecordStatus,
+  updateRecord,
+  updateWeightedRecordSet,
+} from './adapters/v1051/record-actions.js'
 import { sessionFromUpstream } from './adapters/v1051/session.js'
 import { casLoginUrl, casLogoutUrl, CasClient, safeReturnTo } from './auth/cas-client.js'
 import { createCasSession, verifyCasSession } from './auth/cas.js'
@@ -28,6 +74,17 @@ const AuthQuerySchema = z.object({ returnTo: z.string().optional() })
 const CallbackQuerySchema = z.object({
   ticket: z.string().trim().min(1).max(2048),
   returnTo: z.string().optional(),
+})
+const DomainIdParamsSchema = z.object({ domainId: z.coerce.number().int().positive() })
+const AccountIdParamsSchema = z.object({ accountId: z.coerce.number().int().positive() })
+const CategoryIdParamsSchema = z.object({ categoryId: z.coerce.number().int().positive() })
+const RecordIdParamsSchema = z.object({
+  domainId: z.coerce.number().int().positive(),
+  recordId: z.string().trim().min(1).max(1024),
+})
+const AliasIdParamsSchema = z.object({
+  domainId: z.coerce.number().int().positive(),
+  aliasId: z.coerce.number().int().positive(),
 })
 
 function redirect(reply: FastifyReply, location: string) {
@@ -138,6 +195,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         domainsRead: true,
         recordsRead: true,
         domainDetailRead: true,
+        domainAccountsTyped: true,
+        domainCategoriesTyped: true,
+        domainMutationsTyped: true,
+        recordMutationsTyped: true,
+        advancedRecordsTyped: true,
         actionTransport: true,
         actionCount: listLegacyOperations().length,
         databaseAccess: database.enabled,
@@ -210,14 +272,74 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     return { code: 'OK', ...result }
   })
 
+  app.post('/api/web/v1/domains', async (request) => ({
+    code: 'OK',
+    ...await createDomain(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/domains/import', async (request) => ({
+    code: 'OK',
+    ...await batchImportDomains(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.patch('/api/web/v1/domains/batch-remark', async (request) => ({
+    code: 'OK',
+    ...await batchUpdateDomainRemark(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.patch('/api/web/v1/domains/batch-notice', async (request) => ({
+    code: 'OK',
+    ...await batchSetDomainNotice(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/domains/batch-delete', async (request) => ({
+    code: 'OK',
+    ...await batchDeleteDomains(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/domains/expiry-refresh', async (request) => ({
+    code: 'OK',
+    ...await queueDomainExpiryRefresh(client, config, upstreamContext(request, config), request.body),
+  }))
+
   app.get('/api/web/v1/domains/:domainId', async (request) => {
-    const params = z.object({ domainId: z.coerce.number().int().positive() }).parse(request.params)
+    const params = DomainIdParamsSchema.parse(request.params)
     const result = await getDomain(client, config, upstreamContext(request, config), params.domainId)
     return { code: 'OK', data: result }
   })
 
+  app.patch('/api/web/v1/domains/:domainId', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateDomain(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/domains/:domainId', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteDomain(client, config, upstreamContext(request, config), params.domainId),
+    }
+  })
+
+  app.post('/api/web/v1/domains/:domainId/refresh-expiry', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await refreshDomainExpiry(client, config, upstreamContext(request, config), params.domainId),
+    }
+  })
+
   app.get('/api/web/v1/domains/:domainId/records', async (request) => {
-    const params = z.object({ domainId: z.coerce.number().int().positive() }).parse(request.params)
+    const params = DomainIdParamsSchema.parse(request.params)
     const result = await listRecords(
       client,
       config,
@@ -227,6 +349,341 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     )
     return { code: 'OK', ...result }
   })
+
+  app.get('/api/web/v1/domains/:domainId/record-options', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    const data = await getRecordOptions(client, config, upstreamContext(request, config), params.domainId)
+    return { code: 'OK', data }
+  })
+
+  app.get('/api/web/v1/domains/:domainId/record-lookup', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    const data = await lookupRecords(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.domainId,
+      request.query,
+    )
+    return { code: 'OK', data }
+  })
+
+  app.post('/api/web/v1/domains/:domainId/records', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await createRecord(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/domains/:domainId/records/bulk', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await bulkCreateRecords(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/domains/:domainId/records/batch', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await batchOperateRecords(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.patch('/api/web/v1/domains/:domainId/records/by-name', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await quickEditRecordByName(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/domains/:domainId/record-groups', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    const data = await listRecordGroups(client, config, upstreamContext(request, config), params.domainId)
+    return { code: 'OK', data }
+  })
+
+  app.get('/api/web/v1/domains/:domainId/record-logs', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    const result = await listRecordLogs(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.domainId,
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.get('/api/web/v1/domains/:domainId/weighted-records', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    const result = await listWeightedRecordSets(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.domainId,
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.put('/api/web/v1/domains/:domainId/weighted-records', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateWeightedRecordSet(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.patch('/api/web/v1/domains/:domainId/weighted-records/status', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setWeightedRecordStatus(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/domains/:domainId/aliases', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    const data = await listDomainAliases(client, config, upstreamContext(request, config), params.domainId)
+    return { code: 'OK', data }
+  })
+
+  app.post('/api/web/v1/domains/:domainId/aliases', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await createDomainAlias(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/domains/:domainId/aliases/:aliasId', async (request) => {
+    const params = AliasIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteDomainAlias(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        params.aliasId,
+      ),
+    }
+  })
+
+  app.patch('/api/web/v1/domains/:domainId/records/:recordId', async (request) => {
+    const params = RecordIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateRecord(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        params.recordId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/domains/:domainId/records/:recordId', async (request) => {
+    const params = RecordIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteRecord(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        params.recordId,
+      ),
+    }
+  })
+
+  app.patch('/api/web/v1/domains/:domainId/records/:recordId/status', async (request) => {
+    const params = RecordIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setRecordStatus(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        params.recordId,
+        request.body,
+      ),
+    }
+  })
+
+  app.patch('/api/web/v1/domains/:domainId/records/:recordId/remark', async (request) => {
+    const params = RecordIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setRecordRemark(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        params.recordId,
+        request.body,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/domains/:domainId/records/:recordId/check', async (request) => {
+    const params = RecordIdParamsSchema.parse(request.params)
+    const data = await checkRecord(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.domainId,
+      params.recordId,
+      request.body,
+    )
+    return { code: 'OK', data }
+  })
+
+  app.get('/api/web/v1/domain-account-providers', async (request) => {
+    const data = await getDnsProviderDefinitions(client, config, upstreamContext(request, config))
+    return { code: 'OK', data }
+  })
+
+  app.get('/api/web/v1/domain-accounts', async (request) => {
+    const result = await listDomainAccounts(client, config, upstreamContext(request, config), request.query)
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/domain-accounts', async (request) => ({
+    code: 'OK',
+    ...await createDomainAccount(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/domain-accounts/:accountId/available-domains', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    const result = await listAvailableDomains(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.accountId,
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.get('/api/web/v1/domain-accounts/:accountId', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    const data = await getDomainAccount(client, config, upstreamContext(request, config), params.accountId)
+    return { code: 'OK', data }
+  })
+
+  app.put('/api/web/v1/domain-accounts/:accountId', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateDomainAccount(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/domain-accounts/:accountId', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteDomainAccount(client, config, upstreamContext(request, config), params.accountId),
+    }
+  })
+
+  app.get('/api/web/v1/domain-categories', async (request) => {
+    const result = await listDomainCategories(client, config, upstreamContext(request, config), request.query)
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/domain-categories', async (request) => ({
+    code: 'OK',
+    ...await createDomainCategory(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.put('/api/web/v1/domain-categories/:categoryId', async (request) => {
+    const params = CategoryIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateDomainCategory(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.categoryId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/domain-categories/:categoryId', async (request) => {
+    const params = CategoryIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteDomainCategory(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.categoryId,
+      ),
+    }
+  })
+
+  app.patch('/api/web/v1/domain-category-assignment', async (request) => ({
+    code: 'OK',
+    ...await assignDomainCategory(client, config, upstreamContext(request, config), request.body),
+  }))
 
   app.get('/api/web/v1/actions', async () => ({
     code: 'OK',

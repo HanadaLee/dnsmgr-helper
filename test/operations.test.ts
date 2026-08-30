@@ -68,4 +68,9 @@ describe('v1051 operation registry', () => {
       ['do', 'stat'],
     ])
   })
+
+  it('rejects caller-controlled PHP bracket syntax in form key segments', () => {
+    expect(() => toLegacyForm({ 'ids[admin]': '1' })).toThrow('表单字段名称不合法')
+    expect(() => toLegacyForm({ weight: { 'record][admin': 100 } })).toThrow('表单字段名称不合法')
+  })
 })

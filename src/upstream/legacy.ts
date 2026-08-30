@@ -8,7 +8,7 @@ function looksLikeLoginPage(result: UpstreamResult): boolean {
     && result.text.includes('name="password"')
 }
 
-export function requireUpstreamJson(result: UpstreamResult, config: AppConfig): unknown {
+function requireSuccessfulUpstream(result: UpstreamResult, config: AppConfig) {
   if (isLoginRedirect(result)) {
     throw authenticationError(config)
   }
@@ -23,12 +23,27 @@ export function requireUpstreamJson(result: UpstreamResult, config: AppConfig): 
   }
 
   if (looksLikeLoginPage(result)) throw authenticationError(config)
+}
+
+export function requireUpstreamJson(result: UpstreamResult, config: AppConfig): unknown {
+  requireSuccessfulUpstream(result, config)
 
   try {
     return JSON.parse(result.text) as unknown
   } catch {
     throw new ApiError(502, 'UPSTREAM_INVALID_JSON', '原 dnsmgr 返回了无法识别的数据')
   }
+}
+
+export function requireUpstreamHtml(result: UpstreamResult, config: AppConfig): string {
+  requireSuccessfulUpstream(result, config)
+  if (!result.contentType.toLowerCase().includes('text/html')) {
+    throw new ApiError(502, 'UPSTREAM_INVALID_HTML', '原 dnsmgr 返回了无法识别的页面')
+  }
+  if (/无权限|权限不足/.test(result.text)) {
+    throw new ApiError(403, 'FORBIDDEN', '没有权限执行此操作')
+  }
+  return result.text
 }
 
 export function isLoginRedirect(result: UpstreamResult): boolean {

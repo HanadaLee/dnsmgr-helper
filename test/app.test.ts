@@ -651,3 +651,371 @@ describe('full legacy operation bridge', () => {
     })
   })
 })
+
+describe('typed domain management API', () => {
+  it('normalizes domain-account rows without leaking provider credentials', async () => {
+    const appConfig = config()
+    const fetcher = fakeFetch((url, init) => {
+      expect(url.pathname).toBe('/internal/account/data')
+      expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({
+        offset: '0',
+        limit: '10',
+        sortName: 'name',
+        sortOrder: 'asc',
+        kw: 'cloud',
+      })
+      return Response.json({
+        total: 1,
+        rows: [{
+          id: 7,
+          type: 'cloudflare',
+          typename: 'Cloudflare',
+          icon: 'cloudflare.ico',
+          name: 'admin@example.test',
+          config: '{"api_token":"must-not-leak"}',
+          remark: '生产',
+          addtime: '2026-08-31 12:00:00',
+        }],
+      })
+    })
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/domain-accounts?pageSize=10&q=cloud&sort=name&order=asc',
+      headers: { cookie: await authenticatedCookies(appConfig) },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      code: 'OK',
+      data: [{
+        id: 7,
+        provider: { type: 'cloudflare', label: 'Cloudflare', icon: 'cloudflare.ico' },
+        name: 'admin@example.test',
+        remark: '生产',
+        addedAt: '2026-08-31 12:00:00',
+      }],
+      meta: { page: 1, pageSize: 10, total: 1 },
+    })
+    expect(response.body).not.toContain('must-not-leak')
+    expect(response.body).not.toContain('config')
+  })
+
+  it('translates account creation into the exact validated legacy JSON config form', async () => {
+    const appConfig = config()
+    const fetcher = fakeFetch((url, init) => {
+      expect(url.pathname).toBe('/internal/account/add')
+      const form = new URLSearchParams(String(init.body))
+      expect(Object.fromEntries(form)).toEqual({
+        type: 'cloudflare',
+        name: 'admin@example.test',
+        config: '{"email":"admin@example.test","api_token":"secret","proxy":"0"}',
+        remark: '生产',
+      })
+      return Response.json({ code: 0, msg: '添加域名账户成功！' })
+    })
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/domain-accounts',
+      headers: { cookie: await authenticatedCookies(appConfig) },
+      payload: {
+        providerType: 'cloudflare',
+        name: 'admin@example.test',
+        config: { email: 'admin@example.test', api_token: 'secret', proxy: '0' },
+        remark: '生产',
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ code: 'OK', message: '添加域名账户成功！' })
+  })
+
+  it('merges a partial domain patch with current state before calling the legacy edit action', async () => {
+    const appConfig = config()
+    let requestNumber = 0
+    const fetcher = fakeFetch((url, init) => {
+      requestNumber += 1
+      if (requestNumber === 1) {
+        expect(url.pathname).toBe('/internal/domain/data')
+        return Response.json({ total: 1, rows: [{
+          id: 42,
+          aid: 7,
+          cid: 3,
+          name: 'example.com',
+          type: 'cloudflare',
+          typename: 'Cloudflare',
+          recordcount: 2,
+          is_hide: 0,
+          is_sso: 1,
+          is_notice: 1,
+          expiretime: '2027-01-01 00:00:00',
+          remark: '原备注',
+          checkstatus: 1,
+        }] })
+      }
+      expect(url.pathname).toBe('/internal/domain/op/act/edit')
+      expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({
+        id: '42',
+        is_hide: '1',
+        is_sso: '1',
+        is_notice: '1',
+        cid: '3',
+        expiretime: '2027-01-01 00:00:00',
+        remark: '原备注',
+      })
+      return Response.json({ code: 0, msg: '修改域名配置成功！' })
+    })
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/web/v1/domains/42',
+      headers: { cookie: await authenticatedCookies(appConfig) },
+      payload: { hidden: true },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ code: 'OK', message: '修改域名配置成功！' })
+    expect(requestNumber).toBe(2)
+  })
+
+  it('normalizes domain categories and translates assignment arrays', async () => {
+    const appConfig = config()
+    let requestNumber = 0
+    const fetcher = fakeFetch((url, init) => {
+      requestNumber += 1
+      if (requestNumber === 1) {
+        expect(url.pathname).toBe('/internal/domain/category/data')
+        return Response.json({
+          total: 1,
+          rows: [{ id: 3, name: '生产', sort: 10, domain_count: 4, remark: '线上', addtime: '2026-01-01' }],
+        })
+      }
+      expect(url.pathname).toBe('/internal/domain/setcategory')
+      const form = new URLSearchParams(String(init.body))
+      expect(form.getAll('ids[]')).toEqual(['42', '43'])
+      expect(form.get('cid')).toBe('3')
+      return Response.json({ code: 0, msg: '成功设置2个域名的分类！' })
+    })
+    const app = await appWith(fetcher, appConfig)
+    const cookie = await authenticatedCookies(appConfig)
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/domain-categories?pageSize=20',
+      headers: { cookie },
+    })
+    const assignment = await app.inject({
+      method: 'PATCH',
+      url: '/api/web/v1/domain-category-assignment',
+      headers: { cookie },
+      payload: { ids: [42, 43], categoryId: 3 },
+    })
+
+    expect(list.json()).toEqual({
+      code: 'OK',
+      data: [{ id: 3, name: '生产', sort: 10, domainCount: 4, remark: '线上', addedAt: '2026-01-01' }],
+      meta: { page: 1, pageSize: 20, total: 1 },
+    })
+    expect(assignment.json()).toEqual({ code: 'OK', message: '成功设置2个域名的分类！' })
+  })
+})
+
+describe('typed record management API', () => {
+  it('loads versioned record-page state in document mode and exposes stable capabilities', async () => {
+    const appConfig = config()
+    const fetcher = fakeFetch((url, init) => {
+      expect(url.pathname).toBe('/internal/record/42')
+      const headers = new Headers(init.headers)
+      expect(headers.get('accept')).toBe('text/html, application/xhtml+xml')
+      expect(headers.get('x-requested-with')).toBeNull()
+      return new Response(`<html><input name="ttl" value="600" min="1"><script>
+        var recordLine = [{"id":"0","name":"默认","parent":""}];
+        var dnsconfig = {"type":"cloudflare","remark":1,"status":true,"redirect":true,"log":true,"weight":false,"page":true,"sort":false};
+      </script></html>`, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+    })
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/domains/42/record-options',
+      headers: { cookie: await authenticatedCookies(appConfig) },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      code: 'OK',
+      data: {
+        providerType: 'cloudflare',
+        minTtl: 1,
+        lines: [{ id: '0', label: '默认' }],
+        capabilities: { redirectRecords: true, customHostnames: true, clientPaging: true },
+      },
+    })
+  })
+
+  it('maps stable record creation and batch editing to provider-compatible legacy forms', async () => {
+    const appConfig = config()
+    let requestNumber = 0
+    const fetcher = fakeFetch((url, init) => {
+      requestNumber += 1
+      const form = new URLSearchParams(String(init.body))
+      if (requestNumber === 1) {
+        expect(url.pathname).toBe('/internal/record/add/42')
+        expect(Object.fromEntries(form)).toEqual({
+          name: 'www', type: 'A', value: '192.0.2.1', line: '0', ttl: '600',
+          mx: '1', weight: '0', remark: 'web',
+        })
+        return Response.json({ code: 0, msg: '添加解析记录成功！' })
+      }
+      expect(url.pathname).toBe('/internal/record/batchedit/42')
+      expect(form.get('action')).toBe('line')
+      expect(form.get('line')).toBe('oversea')
+      expect(JSON.parse(String(form.get('recordinfo')))).toEqual([{
+        RecordId: 'r1', Name: 'www', Type: 'A', Value: '192.0.2.1', Line: '0',
+        TTL: 600, MX: 1, Weight: 0, Remark: 'web',
+      }])
+      return Response.json({ code: 0, msg: '批量修改解析线路，成功1条，失败0条' })
+    })
+    const app = await appWith(fetcher, appConfig)
+    const cookie = await authenticatedCookies(appConfig)
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/domains/42/records',
+      headers: { cookie },
+      payload: {
+        name: 'www', type: 'a', value: '192.0.2.1', lineId: '0',
+        ttl: 600, mxPriority: 1, weight: 0, remark: 'web',
+      },
+    })
+    const batch = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/domains/42/records/batch',
+      headers: { cookie },
+      payload: {
+        action: 'line',
+        lineId: 'oversea',
+        records: [{
+          id: 'r1', name: 'www', type: 'A', value: '192.0.2.1', lineId: '0',
+          ttl: 600, mxPriority: 1, weight: 0, remark: 'web',
+        }],
+      },
+    })
+
+    expect(create.json()).toEqual({ code: 'OK', message: '添加解析记录成功！' })
+    expect(batch.json()).toEqual({ code: 'OK', message: '批量修改解析线路，成功1条，失败0条' })
+  })
+
+  it('rejects malformed typed record writes before any upstream request', async () => {
+    const appConfig = config()
+    const fetcher = vi.fn() as unknown as FetchLike
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/domains/42/records',
+      headers: { cookie: await authenticatedCookies(appConfig) },
+      payload: { name: 'www', type: 'A', value: '', lineId: '0', ttl: 0, unexpected: true },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.json()).toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('normalizes groups, provider logs, weighted sets and aliases through typed routes', async () => {
+    const appConfig = config()
+    const fetcher = fakeFetch((url, init) => {
+      if (url.pathname === '/internal/record/groups/42') {
+        return Response.json({ code: 0, data: [{ id: '', name: '全部记录' }, { id: 'g1', name: '生产(2)' }] })
+      }
+      if (url.pathname === '/internal/record/log/42') {
+        expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({ offset: '0', limit: '10' })
+        return Response.json({ total: 1, rows: [{ time: '2026-08-31 12:00:00', data: '<b>更新记录</b>' }] })
+      }
+      if (url.pathname === '/internal/record/weight/data/42') {
+        return Response.json({ total: 1, rows: [{
+          id: 'set-1', rr: 'www', SubDomain: 'www.example.com', Type: 'A',
+          RecordCount: 2, Open: 1,
+          LineAlgorithms: { LineAlgorithm: [{ Line: '0', Open: 1 }, { Line: 'oversea', Open: 0 }] },
+        }] })
+      }
+      if (url.pathname === '/internal/record/alias/42' && url.searchParams.get('act') === null) {
+        expect(new Headers(init.headers).get('x-requested-with')).toBeNull()
+        return new Response(`<html><table><tr data-id="8"><td>alias.example.com</td><td>正常</td><td>删除</td></tr></table></html>`, {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        })
+      }
+      if (url.pathname === '/internal/record/weight/42/act/update') {
+        const form = new URLSearchParams(String(init.body))
+        expect(form.get('subdomain')).toBe('www')
+        expect(form.get('status')).toBe('1')
+        expect(form.getAll('weight[r1]')).toEqual(['60'])
+        expect(form.getAll('weight[r2]')).toEqual(['40'])
+        return Response.json({ code: 0, msg: '成功修改2条解析记录权重' })
+      }
+      if (url.pathname === '/internal/record/alias/42' && url.searchParams.get('act') === 'add') {
+        expect(new URLSearchParams(String(init.body)).get('alias')).toBe('new.example.com')
+        return Response.json({ code: 0, msg: '添加域名别名成功' })
+      }
+      throw new Error(`unexpected request: ${url.href}`)
+    })
+    const app = await appWith(fetcher, appConfig)
+    const cookie = await authenticatedCookies(appConfig)
+
+    const groups = await app.inject({
+      method: 'GET', url: '/api/web/v1/domains/42/record-groups', headers: { cookie },
+    })
+    const logs = await app.inject({
+      method: 'GET', url: '/api/web/v1/domains/42/record-logs?pageSize=10', headers: { cookie },
+    })
+    const weights = await app.inject({
+      method: 'GET', url: '/api/web/v1/domains/42/weighted-records?pageSize=10', headers: { cookie },
+    })
+    const aliases = await app.inject({
+      method: 'GET', url: '/api/web/v1/domains/42/aliases', headers: { cookie },
+    })
+    const updateWeights = await app.inject({
+      method: 'PUT',
+      url: '/api/web/v1/domains/42/weighted-records',
+      headers: { cookie },
+      payload: {
+        subdomain: 'www', type: 'A', lineId: '0', enabled: true,
+        weights: { r1: 60, r2: 40 },
+      },
+    })
+    const addAlias = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/domains/42/aliases',
+      headers: { cookie },
+      payload: { name: 'new.example.com' },
+    })
+
+    expect(groups.json()).toEqual({
+      code: 'OK', data: [{ id: '', name: '全部记录' }, { id: 'g1', name: '生产(2)' }],
+    })
+    expect(logs.json()).toEqual({
+      code: 'OK',
+      data: [{ time: '2026-08-31 12:00:00', action: '更新记录' }],
+      meta: { page: 1, pageSize: 10, total: 1 },
+    })
+    expect(weights.json()).toEqual({
+      code: 'OK',
+      data: [{
+        id: 'set-1', lookupName: 'www', subdomain: 'www.example.com', type: 'A',
+        recordCount: 2, enabled: true,
+        lineAlgorithms: [{ lineId: '0', enabled: true }, { lineId: 'oversea', enabled: false }],
+      }],
+      meta: { page: 1, pageSize: 10, total: 1 },
+    })
+    expect(aliases.json()).toEqual({
+      code: 'OK', data: [{ id: 8, name: 'alias.example.com', status: 'active' }],
+    })
+    expect(updateWeights.json()).toEqual({ code: 'OK', message: '成功修改2条解析记录权重' })
+    expect(addAlias.json()).toEqual({ code: 'OK', message: '添加域名别名成功' })
+  })
+})

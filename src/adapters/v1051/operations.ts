@@ -187,6 +187,13 @@ function validateKey(key: string) {
   }
 }
 
+function validateSegment(key: string) {
+  validateKey(key)
+  if (key.includes('[') || key.includes(']')) {
+    throw new ApiError(422, 'VALIDATION_ERROR', '表单字段名称不合法')
+  }
+}
+
 function appendFormValue(
   form: URLSearchParams,
   key: string,
@@ -216,7 +223,7 @@ function appendFormValue(
 
   if (typeof value === 'object') {
     Object.entries(value as Record<string, unknown>).forEach(([child, item]) => {
-      validateKey(child)
+      validateSegment(child)
       appendFormValue(form, `${key}[${child}]`, item, state, depth + 1)
     })
     return
@@ -231,7 +238,10 @@ export function toLegacyForm(
 ): URLSearchParams {
   const form = new URLSearchParams()
   const state = { count: 0 }
-  Object.entries(values).forEach(([key, value]) => appendFormValue(form, key, value, state))
+  Object.entries(values).forEach(([key, value]) => {
+    validateSegment(key)
+    appendFormValue(form, key, value, state)
+  })
   Object.entries(fixed).forEach(([key, value]) => form.set(key, value))
   return form
 }
@@ -259,7 +269,7 @@ function operationDefinition(id: string): LegacyOperationDefinition {
   return definition
 }
 
-type NormalizedOperationResult = {
+export type NormalizedOperationResult = {
   data: unknown
   message?: string
   meta?: { total: number }

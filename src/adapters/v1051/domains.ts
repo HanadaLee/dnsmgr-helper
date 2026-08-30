@@ -133,6 +133,7 @@ function normalizeDomain(row: LegacyRow): DomainSummary {
   const registeredAt = optionalString(row.regtime)
   const expiresAt = optionalString(row.expiretime)
   const category = optionalString(row.category_name)
+  const categoryId = numberValue(row.cid)
   const remark = optionalString(row.remark)
 
   return {
@@ -152,12 +153,13 @@ function normalizeDomain(row: LegacyRow): DomainSummary {
     noticeEnabled: booleanValue(row.is_notice),
     hidden: booleanValue(row.is_hide),
     ssoEnabled: booleanValue(row.is_sso),
+    ...(categoryId === undefined ? {} : { categoryId }),
     ...(category ? { category } : {}),
     ...(remark ? { remark } : {}),
   }
 }
 
-function normalizeRecord(row: LegacyRow): DnsRecord {
+export function normalizeRecord(row: LegacyRow): DnsRecord {
   const id = optionalString(row.RecordId)
   if (!id) {
     throw new ApiError(502, 'UPSTREAM_INVALID_RECORD', '原 dnsmgr 返回了无法识别的解析记录')
@@ -171,11 +173,15 @@ function normalizeRecord(row: LegacyRow): DnsRecord {
   const remark = optionalString(row.Remark)
   const updatedAt = optionalString(row.UpdateTime)
 
+  const rawValue = Array.isArray(row.Value)
+    ? row.Value.map((value) => optionalString(value) ?? '').filter(Boolean).join(',')
+    : optionalString(row.Value) ?? ''
+
   return {
     id,
     name: optionalString(row.Name) ?? '@',
     type: optionalString(row.Type) ?? 'UNKNOWN',
-    value: optionalString(row.Value) ?? '',
+    value: rawValue,
     line: {
       id: lineId,
       label: optionalString(row.LineName) ?? (lineId || '默认'),
