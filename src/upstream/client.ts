@@ -4,6 +4,13 @@ import { ApiError } from '../errors.js'
 export type RequestContext = {
   cookie?: string
   forwardedFor?: string
+  requestId?: string
+  logger?: UpstreamLogger
+}
+
+export type UpstreamLogger = {
+  info(bindings: Record<string, unknown>, message: string): void
+  warn(bindings: Record<string, unknown>, message: string): void
 }
 
 export type UpstreamResult = {
@@ -22,6 +29,15 @@ function setCookieValues(headers: Headers): string[] {
   if (enhancedHeaders.getSetCookie) return enhancedHeaders.getSetCookie()
   const value = headers.get('set-cookie')
   return value ? [value] : []
+}
+
+function redirectPath(location: string | undefined, baseUrl: URL): string | undefined {
+  if (!location) return undefined
+  try {
+    return new URL(location, baseUrl).pathname
+  } catch {
+    return undefined
+  }
 }
 
 export class DnsmgrClient {
@@ -73,6 +89,17 @@ export class DnsmgrClient {
     if (context.forwardedFor) headers.set('x-forwarded-for', context.forwardedFor)
     if (this.config.upstream.host) headers.set('host', this.config.upstream.host)
 
+    const method = init.method ?? 'GET'
+    const startedAt = performance.now()
+    const logContext = {
+      parentRequestId: context.requestId,
+      method,
+      path: url.pathname,
+      upstreamHost: url.host,
+      hasSessionCookie: Boolean(context.cookie),
+    }
+    context.logger?.info(logContext, 'dnsmgr upstream request')
+
     let response: Response
     try {
       response = await this.fetcher(url, {
@@ -82,19 +109,35 @@ export class DnsmgrClient {
         signal: AbortSignal.timeout(this.config.upstream.requestTimeoutMs),
       })
     } catch (error) {
+      context.logger?.warn({
+        ...logContext,
+        responseTime: performance.now() - startedAt,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      }, 'dnsmgr upstream request failed')
       throw new ApiError(502, 'UPSTREAM_UNAVAILABLE', '无法连接原 dnsmgr 服务', {
         reason: error instanceof Error ? error.message : String(error),
       })
     }
 
     const location = response.headers.get('location') ?? undefined
+    const text = await response.text()
+    const setCookies = setCookieValues(response.headers)
+    context.logger?.info({
+      ...logContext,
+      statusCode: response.status,
+      responseTime: performance.now() - startedAt,
+      contentType: response.headers.get('content-type') ?? '',
+      responseBytes: Buffer.byteLength(text),
+      setCookieCount: setCookies.length,
+      ...(location ? { redirectPath: redirectPath(location, url) } : {}),
+    }, 'dnsmgr upstream response')
     return {
       status: response.status,
       headers: response.headers,
-      text: await response.text(),
+      text,
       contentType: response.headers.get('content-type') ?? '',
       ...(location ? { location } : {}),
-      setCookies: setCookieValues(response.headers),
+      setCookies,
     }
   }
 }

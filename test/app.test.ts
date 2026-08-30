@@ -64,6 +64,7 @@ function config(overrides: ConfigOverrides = {}): AppConfig {
       loginPath: '/login',
       registerPath: '/user/op/act/add',
       sessionCookie: 'user_token',
+      bridgeCookie: 'dnsmgr_helper_legacy_session',
     },
     database: {
       enabled: false,
@@ -112,7 +113,7 @@ const profile: CasProfile = {
 
 async function authenticatedCookies(appConfig: AppConfig, legacyToken = 'legacy-session') {
   const helperToken = await createCasSession(profile, appConfig)
-  return `${appConfig.cas.sessionCookie}=${encodeURIComponent(helperToken)}; ${appConfig.legacySso.sessionCookie}=${encodeURIComponent(legacyToken)}`
+  return `${appConfig.cas.sessionCookie}=${encodeURIComponent(helperToken)}; ${appConfig.legacySso.bridgeCookie}=${encodeURIComponent(legacyToken)}`
 }
 
 function casSuccessXml(name = 'hanada') {
@@ -245,6 +246,7 @@ describe('helper-owned CAS flow', () => {
     expect(response.headers.location).toBe('/domains')
     const cookies = responseCookies(response)
     expect(cookies.join('\n')).toContain('dnsmgr_helper_session=')
+    expect(cookies.join('\n')).toContain('dnsmgr_helper_legacy_session=legacy-user-session')
     expect(cookies.join('\n')).toContain('user_token=legacy-user-session')
     expect(cookies.join('\n')).toContain('HttpOnly')
     expect(cookies.join('\n')).toContain('Secure')
@@ -331,6 +333,7 @@ describe('helper-owned CAS flow', () => {
     expect(location.searchParams.get('service')).toBe('https://dns.test/')
     const cookies = responseCookies(response).join('\n')
     expect(cookies).toContain('dnsmgr_helper_session=')
+    expect(cookies).toContain('dnsmgr_helper_legacy_session=')
     expect(cookies).toContain('user_token=')
     expect(cookies).toContain('Max-Age=0')
     expect(fetcher).not.toHaveBeenCalled()
@@ -421,7 +424,7 @@ describe('session compatibility', () => {
     const cookie = [
       `${appConfig.cas.sessionCookie}=${encodeURIComponent(validHelperToken)}`,
       `${appConfig.cas.sessionCookie}=stale-session`,
-      `${appConfig.legacySso.sessionCookie}=legacy-session`,
+      `${appConfig.legacySso.bridgeCookie}=legacy-session`,
     ].join('; ')
     const fetcher = fakeFetch((_url, init) => {
       expect(new Headers(init.headers).get('cookie')).toBe('user_token=legacy-session')
@@ -441,6 +444,30 @@ describe('session compatibility', () => {
     expect(response.json()).toMatchObject({
       data: { user: { name: 'hanada' }, sso: { profileVerified: true } },
     })
+  })
+
+  it('prefers the helper bridge cookie over a stale original dnsmgr cookie', async () => {
+    const appConfig = config()
+    const fetcher = fakeFetch((_url, init) => {
+      expect(new Headers(init.headers).get('cookie')).toBe('user_token=bridge-session')
+      return new Response('<span class="hidden-xs">hanada</span>', {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      })
+    })
+    const app = await appWith(fetcher, appConfig)
+    const cookie = [
+      await authenticatedCookies(appConfig, 'bridge-session'),
+      `${appConfig.legacySso.sessionCookie}=stale-session`,
+    ].join('; ')
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/session',
+      headers: { cookie },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ data: { user: { name: 'hanada' } } })
   })
 })
 

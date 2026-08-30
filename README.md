@@ -9,8 +9,8 @@
 - CAS 登录、回调、退出和签名 Session Cookie
 - 使用 CAS 用户名和托管密码登录原 dnsmgr
 - 用户不存在时使用配置的管理员创建用户，然后重试登录
-- 浏览器同时获得 helper Session 和原 `user_token`
-- API 只向原系统转发 `user_token`，不会泄露 helper Session
+- 浏览器同时获得 helper Session、helper 专用桥接 Cookie 和原 `user_token`
+- API 优先从桥接 Cookie 读取原站令牌，再翻译为上游 `user_token`，不会受同名历史 Cookie 干扰
 - CAS 可关闭；关闭后 API 仅依赖已有的原 dnsmgr Cookie
 - 可选 MySQL/MariaDB 连接池以及 `/readyz` 实际连通性检查
 - 域名、单域名详情和解析记录的稳定只读 API
@@ -115,7 +115,7 @@ docker compose ps
 也可以在本地构建后指定镜像：
 
 ```powershell
-docker build --build-arg APP_VERSION=0.1.3 -t dnsmgr-helper:local .
+docker build --build-arg APP_VERSION=0.1.4 -t dnsmgr-helper:local .
 $env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
 docker compose up -d
 ```
@@ -123,6 +123,8 @@ docker compose up -d
 Compose 使用 Linux host 网络。这与静态配置的回环监听方式配套：容器内的 `127.0.0.1` 就是宿主机，helper 可以通过 `upstream.url` 直接访问同机原 dnsmgr（当前部署为 `http://127.0.0.1:19101/`）以及本机 MySQL，同时不会通过 Docker 额外发布端口。默认还会只读挂载 `/usr/local/dnsmgr/etc/thinkphp.env`；若数据库改用 Unix Socket，还需要按 `docker-compose.yml` 中的注释挂载对应 Socket。
 
 镜像和 Compose 健康检查都读取同一个 `dnsmgr-helper.json`，不会固定使用 `3001`。当前生产示例把 helper 配置为 `127.0.0.1:19102`；修改 `server.host` 或 `server.port` 后，需要同步修改 `deploy/http_dns.hanada.info.conf.example` 中四个 helper 路由的 `proxy_select_local`。`/healthz` 只用于容器存活检查；数据库实际可用性仍由 `/readyz` 判断。
+
+helper 访问原 dnsmgr 时会分别输出 `dnsmgr upstream request` 和 `dnsmgr upstream response` 日志，包含父请求 ID、方法、上游路径、是否携带会话、响应状态、耗时、响应大小和重定向路径。日志不会记录 Cookie 值、托管密码、POST 表单或响应正文。
 
 ## GitLab CI 镜像发布
 
@@ -144,7 +146,7 @@ GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变�
 | `GET` | `/cas/login` | 跳转 CAS 登录 |
 | `GET` | `/cas/callback` | 验证 Ticket、同步 dnsmgr 用户并签发 Cookie |
 | `GET` | `/cas/register` | 兼容入口，重新进入统一登录 |
-| `GET` | `/cas/logout` | 清除两个本地 Cookie 并退出 CAS |
+| `GET` | `/cas/logout` | 清除三个本地 Cookie 并退出 CAS |
 | `GET` | `/login`、`/logout` | 原 dnsmgr 路径兼容别名 |
 | `GET` | `/api/web/v1/compatibility` | 适配版本与功能边界 |
 | `GET` | `/api/web/v1/session` | 当前用户、能力和上游版本 |
@@ -163,4 +165,4 @@ npm test
 npm run build
 ```
 
-测试覆盖 CAS service URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、CAS 关闭模式、Cookie 隔离和 v1051 字段转换，不会连接真实 CAS、数据库或 DNS 供应商。
+测试覆盖 CAS service URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、CAS 关闭模式、Cookie 隔离、上游日志脱敏和 v1051 字段转换，不会连接真实 CAS、数据库或 DNS 供应商。

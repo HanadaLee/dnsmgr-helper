@@ -45,10 +45,10 @@ export class LegacySsoService {
     return { adminUser, managedPassword }
   }
 
-  private async login(username: string): Promise<LoginResult> {
+  private async login(username: string, context: RequestContext = {}): Promise<LoginResult> {
     const { managedPassword } = this.credentials()
     const form = new URLSearchParams({ username, password: managedPassword })
-    const result = await this.client.postForm(this.config.legacySso.loginPath, form, {})
+    const result = await this.client.postForm(this.config.legacySso.loginPath, form, context)
     const payload = requireUpstreamJson(result, this.config)
     const code = numericCode(payload)
     if (code === undefined) {
@@ -64,14 +64,15 @@ export class LegacySsoService {
     return { code, ...(token ? { token } : {}) }
   }
 
-  private async register(profile: CasProfile): Promise<void> {
+  private async register(profile: CasProfile, requestContext: RequestContext): Promise<void> {
     const { adminUser, managedPassword } = this.credentials()
-    const adminLogin = await this.login(adminUser)
+    const adminLogin = await this.login(adminUser, requestContext)
     if (adminLogin.code !== 0 || !adminLogin.token) {
       throw new ApiError(502, 'LEGACY_ADMIN_LOGIN_FAILED', '无法使用配置的管理员登录原 dnsmgr')
     }
 
     const context: RequestContext = {
+      ...requestContext,
       cookie: singleCookieHeader(this.config.legacySso.sessionCookie, adminLogin.token),
     }
     const form = new URLSearchParams({
@@ -91,15 +92,15 @@ export class LegacySsoService {
     }
   }
 
-  async loginOrRegister(profile: CasProfile): Promise<string> {
-    const firstLogin = await this.login(profile.name)
+  async loginOrRegister(profile: CasProfile, context: RequestContext = {}): Promise<string> {
+    const firstLogin = await this.login(profile.name, context)
     if (firstLogin.code === 0 && firstLogin.token) return firstLogin.token
     if (firstLogin.code !== -1) {
       throw new ApiError(502, 'LEGACY_LOGIN_FAILED', 'CAS 用户无法登录原 dnsmgr')
     }
 
-    await this.register(profile)
-    const secondLogin = await this.login(profile.name)
+    await this.register(profile, context)
+    const secondLogin = await this.login(profile.name, context)
     if (secondLogin.code !== 0 || !secondLogin.token) {
       throw new ApiError(502, 'LEGACY_LOGIN_FAILED', 'dnsmgr 用户创建后仍无法登录')
     }

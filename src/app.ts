@@ -12,7 +12,7 @@ import { loadConfig, type AppConfig } from './config.js'
 import type { CasProfile } from './contracts.js'
 import { DatabaseClient } from './database/client.js'
 import { ApiError, registerErrorHandler } from './errors.js'
-import { upstreamContext } from './request-context.js'
+import { upstreamContext, upstreamRequestMetadata } from './request-context.js'
 import { DnsmgrClient, type FetchLike } from './upstream/client.js'
 import { authenticationError } from './upstream/legacy.js'
 
@@ -89,10 +89,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       request.log.warn({
         casSessionStatus: verification.status,
         helperSessionCookieCount: verification.candidateCount,
+        bridgeSessionCookiePresent:
+          cookieValues(request.headers.cookie, config.legacySso.bridgeCookie).length > 0,
         legacySessionCookiePresent:
           cookieValues(request.headers.cookie, config.legacySso.sessionCookie).length > 0,
       }, 'CAS session cookie rejected')
-      throw authenticationError(config)
+      throw authenticationError(config, 'helper-session')
     }
   })
 
@@ -154,7 +156,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     const query = CallbackQuerySchema.parse(request.query)
     const returnTo = safeReturnTo(query.returnTo)
     const profile = await casClient.validate(query.ticket, returnTo)
-    const legacyToken = await legacySso.loginOrRegister(profile)
+    const legacyToken = await legacySso.loginOrRegister(profile, upstreamRequestMetadata(request))
     const helperSession = await createCasSession(profile, config)
     const sessionMaxAge = config.cas.sessionTtlSeconds
 
@@ -162,6 +164,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       serializeHttpOnlyCookie(
         config.cas.sessionCookie,
         helperSession,
+        cookieOptions(config, sessionMaxAge),
+      ),
+      serializeHttpOnlyCookie(
+        config.legacySso.bridgeCookie,
+        legacyToken,
         cookieOptions(config, sessionMaxAge),
       ),
       serializeHttpOnlyCookie(
@@ -176,6 +183,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const logoutHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
     reply.header('set-cookie', [
       serializeHttpOnlyCookie(config.cas.sessionCookie, '', cookieOptions(config, 0)),
+      serializeHttpOnlyCookie(config.legacySso.bridgeCookie, '', cookieOptions(config, 0)),
       serializeHttpOnlyCookie(config.legacySso.sessionCookie, '', cookieOptions(config, 0)),
     ])
     if (!config.cas.enabled) return redirect(reply, config.cas.logoutRedirectPath)

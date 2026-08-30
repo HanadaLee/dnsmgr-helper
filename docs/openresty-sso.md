@@ -9,8 +9,8 @@ OpenResty 不再加载或执行站点级 CAS/SSO 逻辑，只负责 TLS、公开
 - 解析 CAS 用户属性并签发 `dnsmgr_helper_session`；
 - 使用托管密码登录原 dnsmgr；
 - 用户不存在时，用管理员 Cookie 调用原注册控制器；
-- 签发浏览器侧的原 `user_token`；
-- 在每个 Web API 请求上验证 helper Session，并只向原系统转发 `user_token`。
+- 签发 helper 专用桥接 Cookie，并保留浏览器侧的原 `user_token` 供旧路径兼容；
+- 在每个 Web API 请求上验证 helper Session，把桥接 Cookie 翻译为原系统需要的 `user_token`。
 
 ```text
 浏览器
@@ -18,7 +18,7 @@ OpenResty 不再加载或执行站点级 CAS/SSO 逻辑，只负责 TLS、公开
   ├─ /cas/callback?ticket=... ─> dnsmgr-helper
   │                                  ├─ CAS serviceValidate
   │                                  ├─ 原 dnsmgr 登录/必要时注册
-  │                                  └─ Set-Cookie: helper Session + user_token
+  │                                  └─ Set-Cookie: helper Session + bridge Cookie + user_token
   └─ /api/web/v1/* ────────────> dnsmgr-helper ──> 原 dnsmgr 白名单控制器
 
 OpenResty：只转发以上路径，不解析 Ticket、不签 JWT、不托管用户密码。
@@ -64,7 +64,8 @@ helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原
   },
   "legacySso": {
     "adminUser": "<dnsmgr管理员>",
-    "managedPassword": "<托管密码>"
+    "managedPassword": "<托管密码>",
+    "bridgeCookie": "dnsmgr_helper_legacy_session"
   }
 }
 ```
@@ -76,7 +77,7 @@ helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原
 1. 填写 helper 静态配置，但暂时保持 `cas.enabled=false`；
 2. 确认 helper `/healthz`、`/readyz` 和只读 API 可访问；
 3. 填写 `sessionSecret`、管理员和托管密码，把 `cas.enabled` 改为 `true`；
-4. 在本机验证 `/cas/login` 能完成回调并获得两个 Cookie；
+4. 在本机验证 `/cas/login` 能完成回调并获得三个 Cookie；
 5. 再把 DNS 站点的 CAS、login、logout 路径切到 helper，同时删除站点级 Lua SSO；
 6. 验证登录、自动创建用户、退出、域名和解析记录；
 7. 最后再切换 `/next/` 或根路径的新前端。

@@ -9,6 +9,7 @@ process.stdout.write(`${JSON.stringify({
   publicUrl: config.server.publicUrl.href,
   upstreamVersion: config.upstream.version,
   casEnabled: config.cas.enabled,
+  legacyBridgeCookie: config.legacySso.bridgeCookie,
   databaseEnabled: config.database.enabled,
   databaseConfigSource: !config.database.enabled
     ? 'disabled'

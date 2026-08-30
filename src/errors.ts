@@ -22,8 +22,14 @@ export function sendApiError(reply: FastifyReply, error: ApiError) {
 }
 
 export function registerErrorHandler(app: FastifyInstance) {
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     if (error instanceof ApiError) {
+      if (error.code === 'AUTH_REQUIRED') {
+        const details = error.details && typeof error.details === 'object'
+          ? error.details as Record<string, unknown>
+          : undefined
+        request.log.warn({ authSource: details?.source }, 'authentication required')
+      }
       return sendApiError(reply, error)
     }
 

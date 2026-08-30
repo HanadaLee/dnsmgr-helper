@@ -79,6 +79,7 @@ const ConfigSchema = z.object({
     loginPath: RelativePath.default('/login'),
     registerPath: RelativePath.default('/user/op/act/add'),
     sessionCookie: CookieName.default('user_token'),
+    bridgeCookie: CookieName.default('dnsmgr_helper_legacy_session'),
   }),
   database: z.object({
     enabled: z.boolean().default(false),
@@ -100,8 +101,17 @@ const ConfigSchema = z.object({
   if (new Set(authPaths).size !== authPaths.length) {
     context.addIssue({ code: 'custom', path: ['cas'], message: '登录、回调和退出路径不能重复' })
   }
-  if (value.cas.sessionCookie === value.legacySso.sessionCookie) {
-    context.addIssue({ code: 'custom', path: ['cas', 'sessionCookie'], message: 'helper Session Cookie 不能与原 dnsmgr Cookie 同名' })
+  const cookieNames = [
+    value.cas.sessionCookie,
+    value.legacySso.sessionCookie,
+    value.legacySso.bridgeCookie,
+  ]
+  if (new Set(cookieNames).size !== cookieNames.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['legacySso', 'bridgeCookie'],
+      message: 'CAS Session、原 dnsmgr 和桥接 Cookie 名称不能重复',
+    })
   }
   if (value.cas.cookieSameSite === 'none' && !value.cas.cookieSecure) {
     context.addIssue({ code: 'custom', path: ['cas', 'cookieSecure'], message: 'SameSite=None 时必须启用 Secure' })
