@@ -44,7 +44,7 @@ export function registerErrorHandler(app: FastifyInstance) {
     app.log.error(error)
     return reply.code(500).send({
       code: 'INTERNAL_ERROR',
-      message: 'dnsmgr-helper 内部错误',
+      message: '服务内部错误',
     })
   })
 }

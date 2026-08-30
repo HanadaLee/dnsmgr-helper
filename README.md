@@ -115,7 +115,7 @@ docker compose ps
 也可以在本地构建后指定镜像：
 
 ```powershell
-docker build --build-arg APP_VERSION=0.1.5 -t dnsmgr-helper:local .
+docker build --build-arg APP_VERSION=0.2.0 -t dnsmgr-helper:local .
 $env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
 docker compose up -d
 ```
@@ -153,6 +153,10 @@ GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变�
 | `GET` | `/api/web/v1/domains` | 域名列表 |
 | `GET` | `/api/web/v1/domains/:id` | 域名详情 |
 | `GET` | `/api/web/v1/domains/:id/records` | 解析记录列表 |
+| `GET` | `/api/web/v1/actions` | 当前适配版本允许执行的操作目录 |
+| `POST` | `/api/web/v1/actions/:operationId` | 执行白名单中的 dnsmgr 操作并转换响应 |
+
+操作入口只接受注册在 v1051 适配器中的固定操作，不接受任意上游 URL。请求体由 `path` 与 `form` 两部分组成；`path` 只填充注册路径中的正整数参数，`form` 会转换成 ThinkPHP/jQuery 兼容的 URL 编码表单。当前操作目录覆盖 142 个原版服务端列表与动作入口，详细范围及尚待类型化的页面初始化数据见 [完整迁移矩阵](docs/migration-matrix.md)。
 
 OpenResty 的无认证融合方式和迁移顺序见 [docs/openresty-sso.md](docs/openresty-sso.md)。
 
@@ -165,4 +169,4 @@ npm test
 npm run build
 ```
 
-测试覆盖 CAS service URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、CAS 关闭模式、Cookie 隔离、上游日志脱敏和 v1051 字段转换，不会连接真实 CAS、数据库或 DNS 供应商。
+测试覆盖身份认证 URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、认证关闭模式、Cookie 隔离、上游日志脱敏、v1051 字段转换、全量操作白名单、PHP 表单编码与动态路径拦截，不会连接真实认证服务、数据库或 DNS 供应商。

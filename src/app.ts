@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { z } from 'zod'
 
 import { getDomain, listDomains, listRecords } from './adapters/v1051/domains.js'
+import { executeLegacyOperation, listLegacyOperations } from './adapters/v1051/operations.js'
 import { sessionFromUpstream } from './adapters/v1051/session.js'
 import { casLoginUrl, casLogoutUrl, CasClient, safeReturnTo } from './auth/cas-client.js'
 import { createCasSession, verifyCasSession } from './auth/cas.js'
@@ -77,7 +78,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       throw new ApiError(
         503,
         'UPSTREAM_VERSION_UNSUPPORTED',
-        `当前 helper 不支持 dnsmgr ${config.upstream.version}`,
+        `当前服务不支持 dnsmgr ${config.upstream.version}`,
         { supportedVersions: [ADAPTER_VERSION] },
       )
     }
@@ -137,12 +138,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         domainsRead: true,
         recordsRead: true,
         domainDetailRead: true,
-        mutations: false,
+        actionTransport: true,
+        actionCount: listLegacyOperations().length,
         databaseAccess: database.enabled,
-      },
-      sso: {
-        owner: config.cas.enabled ? 'dnsmgr-helper' : 'disabled',
-        casEnabled: config.cas.enabled,
       },
     },
   }))
@@ -226,6 +224,23 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       upstreamContext(request, config),
       params.domainId,
       request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.get('/api/web/v1/actions', async () => ({
+    code: 'OK',
+    data: listLegacyOperations(),
+  }))
+
+  app.post('/api/web/v1/actions/:operationId', async (request) => {
+    const params = z.object({ operationId: z.string().trim().min(1).max(128) }).parse(request.params)
+    const result = await executeLegacyOperation(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.operationId,
+      request.body,
     )
     return { code: 'OK', ...result }
   })

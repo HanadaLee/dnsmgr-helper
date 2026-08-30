@@ -559,3 +559,95 @@ describe('v1051 list translation', () => {
     })
   })
 })
+
+describe('full legacy operation bridge', () => {
+  it('forwards an allowlisted action with validated path parameters and PHP form encoding', async () => {
+    const appConfig = config()
+    const fetcher = fakeFetch((url, init) => {
+      expect(url.pathname).toBe('/internal/record/batch/42')
+      const headers = new Headers(init.headers)
+      expect(headers.get('cookie')).toBe('user_token=legacy-operation-session')
+      expect(headers.get('x-requested-with')).toBe('XMLHttpRequest')
+      expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toMatchObject({
+        action: 'group',
+        groupid: '7',
+      })
+      expect(new URLSearchParams(String(init.body)).getAll('recordids[]')).toEqual(['r-1', 'r-2'])
+      return Response.json({ code: 0, msg: '成功移动2条解析记录' })
+    })
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/actions/records.batchOperate',
+      headers: { cookie: await authenticatedCookies(appConfig, 'legacy-operation-session') },
+      payload: {
+        path: { domainId: 42 },
+        form: { action: 'group', groupid: 7, recordids: ['r-1', 'r-2'] },
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      code: 'OK',
+      data: null,
+      message: '成功移动2条解析记录',
+    })
+  })
+
+  it('rejects unknown actions and invalid dynamic ids before contacting dnsmgr', async () => {
+    const appConfig = config()
+    const fetcher = vi.fn() as unknown as FetchLike
+    const app = await appWith(fetcher, appConfig)
+    const cookie = await authenticatedCookies(appConfig)
+
+    const unknown = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/actions/not.registered',
+      headers: { cookie },
+      payload: {},
+    })
+    const invalidId = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/actions/records.create',
+      headers: { cookie },
+      payload: { path: { domainId: '../login' }, form: {} },
+    })
+    const inheritedName = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/actions/toString',
+      headers: { cookie },
+      payload: {},
+    })
+
+    expect(unknown.statusCode).toBe(404)
+    expect(unknown.json()).toMatchObject({ code: 'ACTION_NOT_FOUND' })
+    expect(invalidId.statusCode).toBe(422)
+    expect(invalidId.json()).toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(inheritedName.statusCode).toBe(404)
+    expect(inheritedName.json()).toMatchObject({ code: 'ACTION_NOT_FOUND' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('maps a legacy business failure to the stable API error envelope', async () => {
+    const appConfig = config()
+    const app = await appWith(fakeFetch(() => Response.json({
+      code: -1,
+      msg: '该分类下存在域名，无法删除',
+    })), appConfig)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/web/v1/actions/domainCategories.delete',
+      headers: { cookie: await authenticatedCookies(appConfig) },
+      payload: { form: { id: 3 } },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.json()).toEqual({
+      code: 'OPERATION_FAILED',
+      message: '该分类下存在域名，无法删除',
+      details: { upstreamCode: -1 },
+    })
+  })
+})
