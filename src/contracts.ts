@@ -192,3 +192,113 @@ export type DomainAlias = {
   name: string
   status: 'active' | 'blocked' | 'dns_error' | 'unknown'
 }
+
+export type AutomationDomainOption = {
+  id: number
+  name: string
+  providerType: string
+}
+
+export type DnsRecordSnapshot = {
+  lineId: string
+  lineLabel?: string
+  ttl: number
+  value?: string
+}
+
+export type MonitoringOverview = {
+  workerRunning: boolean
+  runCountToday: number
+  alertsLast24Hours: number
+  switchesLast24Hours: number
+  lastRunAt?: string
+  lastError?: string
+  swooleInstalled: boolean
+  notifications: {
+    email: boolean
+    wechat: boolean
+    telegram: boolean
+    robotWebhook: boolean
+    customWebhook: boolean
+  }
+}
+
+export type MonitoringTask = {
+  id: number
+  domainId: number
+  domain: string
+  recordName: string
+  recordId: string
+  action: 'none' | 'disable' | 'failover' | 'conditional-enable' | 'unknown'
+  primaryValue: string
+  backupValue?: string
+  checkType: 'ping' | 'tcp' | 'http' | 'unknown'
+  checkUrl?: string
+  tcpPort?: number
+  intervalSeconds: number
+  cycleCount: number
+  timeoutSeconds: number
+  useProxy: boolean
+  enableCloudflareProxy: boolean
+  active: boolean
+  health: 'healthy' | 'failed' | 'unknown'
+  checkedAt?: string
+  addedAt?: string
+  remark?: string
+  record?: DnsRecordSnapshot
+  alertsLast24Hours?: number
+  switchesLast24Hours?: number
+}
+
+export type MonitoringTaskLog = {
+  id: number
+  event: 'failure' | 'recovery' | 'unknown'
+  time?: string
+  error?: string
+}
+
+export type ScheduledDnsTask = {
+  id: number
+  domainId: number
+  domain: string
+  recordName: string
+  recordId: string
+  execution: 'once' | 'recurring' | 'unknown'
+  cycle: 'daily' | 'weekly' | 'monthly' | 'unknown'
+  action: 'update' | 'enable' | 'disable' | 'delete' | 'unknown'
+  switchDate?: string
+  switchTime: string
+  value?: string
+  lineMode: 'unchanged' | 'dns-only' | 'proxied' | 'unknown'
+  active: boolean
+  lastRunAt?: string
+  nextRunAt?: string
+  addedAt?: string
+  remark?: string
+  record?: DnsRecordSnapshot
+}
+
+export type OptimizeIpSettings = {
+  dataSource: 'wetest' | 'hostmonit' | 'xingpingcn'
+  apiKey: string
+  proxyUrl: string
+  intervalMinutes: number
+}
+
+export type OptimizeIpTask = {
+  id: number
+  domainId: number
+  domain: string
+  recordName: string
+  lineStrategy: 'carrier-lines' | 'default-unicom-mobile' | 'unknown'
+  ipVersions: Array<'v4' | 'v6'>
+  cdnProvider: 'cloudflare' | 'cloudfront' | 'gcore' | 'edgeone' | 'unknown'
+  recordCount: number
+  ttl: number
+  active: boolean
+  status: 'never-run' | 'success' | 'failed' | 'unknown'
+  lastRunAt?: string
+  lastError?: string
+  addedAt?: string
+  remark?: string
+}

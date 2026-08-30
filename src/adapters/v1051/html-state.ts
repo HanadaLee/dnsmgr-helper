@@ -112,12 +112,49 @@ export function integerInputAttribute(
   inputName: string,
   attribute: string,
 ): number | undefined {
-  const escapedName = regexpEscape(inputName)
-  const input = new RegExp(`<input\\b[^>]*\\bname=["']${escapedName}["'][^>]*>`, 'i').exec(html)?.[0]
-  if (!input) return undefined
-  const escapedAttribute = regexpEscape(attribute)
-  const value = new RegExp(`\\b${escapedAttribute}=["'](-?\\d+)["']`, 'i').exec(input)?.[1]
+  const value = namedElementAttribute(html, 'input', inputName, attribute)
   if (value === undefined) return undefined
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) ? parsed : undefined
+}
+
+export function namedElementAttribute(
+  html: string,
+  tag: 'input' | 'select' | 'textarea',
+  elementName: string,
+  attribute: string,
+): string | undefined {
+  const escapedName = regexpEscape(elementName)
+  const element = new RegExp(
+    `<${tag}\\b(?=[^>]*\\bname\\s*=\\s*(?:["']${escapedName}["']|${escapedName}(?=\\s|>)))[^>]*>`,
+    'i',
+  ).exec(html)?.[0]
+  if (!element) return undefined
+
+  const escapedAttribute = regexpEscape(attribute)
+  const match = new RegExp(
+    `\\b${escapedAttribute}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    'i',
+  ).exec(element)
+  if (!match) return undefined
+  return plainText(match[1] ?? match[2] ?? match[3] ?? '') ?? ''
+}
+
+export function namedSelectOptions(
+  html: string,
+  elementName: string,
+): Array<{ value: string; label: string }> {
+  const escapedName = regexpEscape(elementName)
+  const select = new RegExp(
+    `<select\\b(?=[^>]*\\bname\\s*=\\s*(?:["']${escapedName}["']|${escapedName}(?=\\s|>)))[^>]*>([\\s\\S]*?)</select>`,
+    'i',
+  ).exec(html)?.[1]
+  if (select === undefined) return []
+
+  return Array.from(select.matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi)).flatMap((match) => {
+    const valueMatch = /\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(match[1] ?? '')
+    const value = plainText(valueMatch?.[1] ?? valueMatch?.[2] ?? valueMatch?.[3] ?? '') ?? ''
+    const label = plainText(match[2]) ?? ''
+    return value || label ? [{ value, label }] : []
+  })
 }

@@ -154,6 +154,120 @@
 | `POST` | `/domains/:domainId/aliases` | 新增别名 |
 | `DELETE` | `/domains/:domainId/aliases/:aliasId` | 删除别名 |
 
+## DNS 监控
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/monitoring/overview` | 进程、当日运行、24 小时告警/切换、Swoole 与通知开关 |
+| `GET` | `/monitoring/worker-status` | 转换原公开状态入口为 `{ running }` |
+| `PUT` | `/monitoring/notifications` | 更新邮件、微信、Telegram 和两类 Webhook 开关 |
+| `POST` | `/monitoring/logs/clean` | 清理指定天数以前的切换日志 |
+| `GET` | `/monitoring/form` | 可用域名、PING 能力和安全默认值 |
+| `GET` | `/monitoring/tasks` | 任务分页、筛选和排序 |
+| `POST` | `/monitoring/tasks` | 新增任务 |
+| `GET` | `/monitoring/tasks/:taskId` | 编辑详情和 24 小时任务统计 |
+| `PUT` | `/monitoring/tasks/:taskId` | 完整更新任务 |
+| `PATCH` | `/monitoring/tasks/:taskId/status` | 启用或停用任务 |
+| `DELETE` | `/monitoring/tasks/:taskId` | 删除任务及关联日志 |
+| `POST` | `/monitoring/tasks/batch` | 批量删除、重试、启用或停用 |
+| `GET` | `/monitoring/tasks/:taskId/logs` | 任务异常与恢复日志 |
+
+任务写入使用稳定字段，helper 会自行生成原版 `recordinfo`：
+
+```json
+{
+  "domainId": 42,
+  "recordName": "www",
+  "recordId": "provider-record-id",
+  "action": "failover",
+  "primaryValue": "192.0.2.10",
+  "backupValue": "192.0.2.11",
+  "checkType": "tcp",
+  "checkUrl": null,
+  "tcpPort": 443,
+  "intervalSeconds": 10,
+  "cycleCount": 3,
+  "timeoutSeconds": 5,
+  "useProxy": false,
+  "enableCloudflareProxy": true,
+  "remark": "生产入口",
+  "record": { "lineId": "0", "lineLabel": "默认", "ttl": 600 }
+}
+```
+
+`action` 支持 `none`、`disable`、`failover`、`conditional-enable`；`checkType` 支持 `ping`、`tcp`、`http`。通知接口只接受 `email`、`wechat`、`telegram`、`robotWebhook`、`customWebhook` 五个布尔字段，不接受任意系统设置键。
+
+## 定时切换
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/schedules/form` | 可用域名与默认值 |
+| `GET` | `/schedules` | 任务分页、筛选和排序 |
+| `POST` | `/schedules` | 新增任务 |
+| `GET` | `/schedules/:taskId` | 编辑详情 |
+| `PUT` | `/schedules/:taskId` | 完整更新任务 |
+| `PATCH` | `/schedules/:taskId/status` | 启用或停用任务 |
+| `DELETE` | `/schedules/:taskId` | 删除任务 |
+| `POST` | `/schedules/batch` | 批量删除、启用或停用 |
+
+周期任务示例：
+
+```json
+{
+  "domainId": 42,
+  "recordName": "www",
+  "recordId": "provider-record-id",
+  "execution": "recurring",
+  "cycle": "weekly",
+  "action": "update",
+  "switchDate": "1",
+  "switchTime": "08:30",
+  "value": "192.0.2.20",
+  "lineMode": "unchanged",
+  "remark": "每周一切换",
+  "record": {
+    "value": "192.0.2.10",
+    "lineId": "0",
+    "lineLabel": "默认",
+    "ttl": 600
+  }
+}
+```
+
+`execution` 为 `once` 时，`switchTime` 使用 `YYYY-MM-DDTHH:mm`；为 `recurring` 时使用 `HH:mm`。`cycle` 支持 `daily`、`weekly`、`monthly`，每周的 `switchDate` 为 `0..6`，每月为 `1..31`。删除解析仅允许单次任务。
+
+## 优选 IP
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/optimize-ip/settings` | 当前数据源、密钥、代理和更新间隔 |
+| `PUT` | `/optimize-ip/settings` | 局部更新固定的四项设置 |
+| `POST` | `/optimize-ip/account-balance` | 查询 wetest 或 HostMonit 余额 |
+| `GET` | `/optimize-ip/form` | 可选域名、当前数据源和默认值 |
+| `GET` | `/optimize-ip/worker-status` | 转换原公开状态入口为 `{ running }` |
+| `GET` | `/optimize-ip/tasks` | 任务分页、筛选和排序 |
+| `POST` | `/optimize-ip/tasks` | 新增任务 |
+| `GET` | `/optimize-ip/tasks/:taskId` | 编辑详情 |
+| `PUT` | `/optimize-ip/tasks/:taskId` | 完整更新任务 |
+| `PATCH` | `/optimize-ip/tasks/:taskId/status` | 启用或停用任务 |
+| `DELETE` | `/optimize-ip/tasks/:taskId` | 删除任务 |
+| `POST` | `/optimize-ip/tasks/:taskId/run` | 立即执行一次 |
+
+```json
+{
+  "domainId": 42,
+  "recordName": "edge",
+  "lineStrategy": "carrier-lines",
+  "ipVersions": ["v4", "v6"],
+  "cdnProvider": "edgeone",
+  "recordCount": 2,
+  "ttl": 600,
+  "remark": "边缘入口"
+}
+```
+
+`lineStrategy` 支持 `carrier-lines`、`default-unicom-mobile`；`cdnProvider` 支持 `cloudflare`、`cloudfront`、`gcore`、`edgeone`。优选 IP 表单接口只返回原版已允许的非 Cloudflare DNS 域名。
+
 ## 兼容动作入口
 
 `GET /actions` 与 `POST /actions/:operationId` 是开发迁移期的受控兜底，只接受 v1051 白名单中的固定动作和动态正整数路径参数。新前端应优先使用本文件中的类型化接口；每完成一个功能域，就不应再依赖该域的通用动作入口。

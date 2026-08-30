@@ -46,6 +46,11 @@ export function requireUpstreamHtml(result: UpstreamResult, config: AppConfig): 
   return result.text
 }
 
+export function requireUpstreamText(result: UpstreamResult, config: AppConfig): string {
+  requireSuccessfulUpstream(result, config)
+  return result.text.trim()
+}
+
 export function isLoginRedirect(result: UpstreamResult): boolean {
   if (result.status < 300 || result.status >= 400 || !result.location) return false
   try {

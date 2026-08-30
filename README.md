@@ -16,6 +16,8 @@
 - 域名账户列表脱敏、供应商动态字段、编辑回填、增删改和供应商域名发现
 - 域名、分类、解析记录及高级解析的稳定类型化读写 API
 - 解析线路、最小 TTL、供应商能力、分组、日志、权重和域名别名转换
+- DNS 监控概览、任务、通知、日志与进程状态的稳定类型化 API
+- 定时切换任务及 CF 优选 IP 设置、额度、任务和立即执行 API
 - 未知 dnsmgr 版本保护、统一 JSON 错误和固定上游路径白名单
 
 ## 静态配置
@@ -117,7 +119,7 @@ docker compose ps
 也可以在本地构建后指定镜像：
 
 ```powershell
-docker build --build-arg APP_VERSION=0.3.0 -t dnsmgr-helper:local .
+docker build --build-arg APP_VERSION=0.4.0 -t dnsmgr-helper:local .
 $env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
 docker compose up -d
 ```
@@ -159,6 +161,9 @@ GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变�
 | `GET/POST/PUT/DELETE` | `/api/web/v1/domain-accounts...` | 域名账户与供应商字段 |
 | `GET/POST/PUT/DELETE` | `/api/web/v1/domain-categories...` | 域名分类与批量分配 |
 | `GET/POST/PATCH/DELETE` | `/api/web/v1/domains/:id/records...` | 记录、分组、日志、权重与别名 |
+| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/monitoring...` | 监控概览、任务、通知与日志 |
+| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/schedules...` | 定时切换任务 |
+| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/optimize-ip...` | 优选 IP 设置、额度、状态与任务 |
 | `GET` | `/api/web/v1/actions` | 当前适配版本允许执行的操作目录 |
 | `POST` | `/api/web/v1/actions/:operationId` | 执行白名单中的 dnsmgr 操作并转换响应 |
 
@@ -175,4 +180,4 @@ npm test
 npm run build
 ```
 
-测试覆盖身份认证 URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、认证关闭模式、Cookie 隔离、上游日志脱敏、v1051 字段转换、账户密钥脱敏、版本化页面状态解析、域名局部更新、记录单项与批量转换、全量操作白名单、PHP 表单编码与动态路径拦截，不会连接真实认证服务、数据库或 DNS 供应商。
+测试覆盖身份认证 URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、认证关闭模式、Cookie 隔离、上游日志脱敏、v1051 字段转换、账户密钥脱敏、版本化页面状态解析、域名局部更新、记录单项与批量转换、监控/定时/优选 IP 全操作转换、全量操作白名单、PHP 表单编码与动态路径拦截，不会连接真实认证服务、数据库或 DNS 供应商。

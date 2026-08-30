@@ -28,7 +28,36 @@ import {
   updateDomainCategory,
 } from './adapters/v1051/domain-actions.js'
 import { getDomain, listDomains, listRecords } from './adapters/v1051/domains.js'
+import {
+  batchOperateMonitoringTasks,
+  cleanMonitoringLogs,
+  createMonitoringTask,
+  deleteMonitoringTask,
+  getMonitoringForm,
+  getMonitoringOverview,
+  getMonitoringTask,
+  getMonitoringWorkerStatus,
+  listMonitoringTaskLogs,
+  listMonitoringTasks,
+  setMonitoringTaskStatus,
+  updateMonitoringNotifications,
+  updateMonitoringTask,
+} from './adapters/v1051/monitoring.js'
 import { executeLegacyOperation, listLegacyOperations } from './adapters/v1051/operations.js'
+import {
+  createOptimizeIpTask,
+  deleteOptimizeIpTask,
+  getOptimizeIpSettings,
+  getOptimizeIpTask,
+  getOptimizeIpTaskForm,
+  getOptimizeIpWorkerStatus,
+  listOptimizeIpTasks,
+  queryOptimizeIpAccount,
+  runOptimizeIpTask,
+  setOptimizeIpTaskStatus,
+  updateOptimizeIpSettings,
+  updateOptimizeIpTask,
+} from './adapters/v1051/optimize-ip.js'
 import {
   batchOperateRecords,
   bulkCreateRecords,
@@ -50,6 +79,16 @@ import {
   updateRecord,
   updateWeightedRecordSet,
 } from './adapters/v1051/record-actions.js'
+import {
+  batchOperateScheduledTasks,
+  createScheduledTask,
+  deleteScheduledTask,
+  getScheduledTask,
+  getScheduledTaskForm,
+  listScheduledTasks,
+  setScheduledTaskStatus,
+  updateScheduledTask,
+} from './adapters/v1051/schedules.js'
 import { sessionFromUpstream } from './adapters/v1051/session.js'
 import { casLoginUrl, casLogoutUrl, CasClient, safeReturnTo } from './auth/cas-client.js'
 import { createCasSession, verifyCasSession } from './auth/cas.js'
@@ -86,6 +125,7 @@ const AliasIdParamsSchema = z.object({
   domainId: z.coerce.number().int().positive(),
   aliasId: z.coerce.number().int().positive(),
 })
+const TaskIdParamsSchema = z.object({ taskId: z.coerce.number().int().positive() })
 
 function redirect(reply: FastifyReply, location: string) {
   return reply.code(302).header('location', location).send()
@@ -200,6 +240,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         domainMutationsTyped: true,
         recordMutationsTyped: true,
         advancedRecordsTyped: true,
+        monitoringTyped: true,
+        schedulesTyped: true,
+        optimizeIpTyped: true,
         actionTransport: true,
         actionCount: listLegacyOperations().length,
         databaseAccess: database.enabled,
@@ -684,6 +727,288 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     code: 'OK',
     ...await assignDomainCategory(client, config, upstreamContext(request, config), request.body),
   }))
+
+  app.get('/api/web/v1/monitoring/overview', async (request) => ({
+    code: 'OK',
+    data: await getMonitoringOverview(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/monitoring/worker-status', async (request) => ({
+    code: 'OK',
+    data: await getMonitoringWorkerStatus(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/monitoring/notifications', async (request) => ({
+    code: 'OK',
+    ...await updateMonitoringNotifications(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.body,
+    ),
+  }))
+
+  app.post('/api/web/v1/monitoring/logs/clean', async (request) => ({
+    code: 'OK',
+    ...await cleanMonitoringLogs(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/monitoring/form', async (request) => ({
+    code: 'OK',
+    data: await getMonitoringForm(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/monitoring/tasks', async (request) => {
+    const result = await listMonitoringTasks(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/monitoring/tasks', async (request) => ({
+    code: 'OK',
+    ...await createMonitoringTask(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/monitoring/tasks/batch', async (request) => ({
+    code: 'OK',
+    ...await batchOperateMonitoringTasks(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.body,
+    ),
+  }))
+
+  app.get('/api/web/v1/monitoring/tasks/:taskId', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getMonitoringTask(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.taskId,
+      ),
+    }
+  })
+
+  app.put('/api/web/v1/monitoring/tasks/:taskId', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateMonitoringTask(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.taskId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/monitoring/tasks/:taskId', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteMonitoringTask(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.taskId,
+      ),
+    }
+  })
+
+  app.patch('/api/web/v1/monitoring/tasks/:taskId/status', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setMonitoringTaskStatus(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.taskId,
+        request.body,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/monitoring/tasks/:taskId/logs', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    const result = await listMonitoringTaskLogs(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.taskId,
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.get('/api/web/v1/schedules/form', async (request) => ({
+    code: 'OK',
+    data: await getScheduledTaskForm(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/schedules', async (request) => {
+    const result = await listScheduledTasks(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/schedules', async (request) => ({
+    code: 'OK',
+    ...await createScheduledTask(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/schedules/batch', async (request) => ({
+    code: 'OK',
+    ...await batchOperateScheduledTasks(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/schedules/:taskId', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getScheduledTask(client, config, upstreamContext(request, config), params.taskId),
+    }
+  })
+
+  app.put('/api/web/v1/schedules/:taskId', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateScheduledTask(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.taskId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/schedules/:taskId', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteScheduledTask(client, config, upstreamContext(request, config), params.taskId),
+    }
+  })
+
+  app.patch('/api/web/v1/schedules/:taskId/status', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setScheduledTaskStatus(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.taskId,
+        request.body,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/optimize-ip/settings', async (request) => ({
+    code: 'OK',
+    data: await getOptimizeIpSettings(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/optimize-ip/settings', async (request) => ({
+    code: 'OK',
+    ...await updateOptimizeIpSettings(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/optimize-ip/account-balance', async (request) => ({
+    code: 'OK',
+    ...await queryOptimizeIpAccount(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/optimize-ip/form', async (request) => ({
+    code: 'OK',
+    data: await getOptimizeIpTaskForm(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/optimize-ip/worker-status', async (request) => ({
+    code: 'OK',
+    data: await getOptimizeIpWorkerStatus(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/optimize-ip/tasks', async (request) => {
+    const result = await listOptimizeIpTasks(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/optimize-ip/tasks', async (request) => ({
+    code: 'OK',
+    ...await createOptimizeIpTask(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/optimize-ip/tasks/:taskId', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getOptimizeIpTask(client, config, upstreamContext(request, config), params.taskId),
+    }
+  })
+
+  app.put('/api/web/v1/optimize-ip/tasks/:taskId', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateOptimizeIpTask(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.taskId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/optimize-ip/tasks/:taskId', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteOptimizeIpTask(client, config, upstreamContext(request, config), params.taskId),
+    }
+  })
+
+  app.patch('/api/web/v1/optimize-ip/tasks/:taskId/status', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setOptimizeIpTaskStatus(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.taskId,
+        request.body,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/optimize-ip/tasks/:taskId/run', async (request) => {
+    const params = TaskIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await runOptimizeIpTask(client, config, upstreamContext(request, config), params.taskId),
+    }
+  })
 
   app.get('/api/web/v1/actions', async () => ({
     code: 'OK',
