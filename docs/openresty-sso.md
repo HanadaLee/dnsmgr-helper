@@ -42,7 +42,7 @@ OpenResty：只转发以上路径，不解析 Ticket、不签 JWT、不托管用
 以现有 DNS 站点为基础审核并采用完整的 [`deploy/http_dns.hanada.info.conf.example`](../deploy/http_dns.hanada.info.conf.example)：
 
 - `/api/web/v1/`、`/cas/`、`/login`、`/logout` 转发到 helper；
-- 原 `/api` 可暂时保留给旧页面；
+- 原 `/api` 可以继续直达 dnsmgr；helper 也已实现相同固定公开路径，切换时不改变 API Key 签名和响应格式；
 - `/setpwd`、`/system/loginset` 可以继续做普通外部跳转，它们不再参与认证。
 
 helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原 dnsmgr；OpenResty 不再为 helper 提供 legacy 中转路径。

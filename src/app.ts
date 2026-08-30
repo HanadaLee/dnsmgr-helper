@@ -1,4 +1,5 @@
 import helmet from '@fastify/helmet'
+import formbody from '@fastify/formbody'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { z } from 'zod'
 
@@ -11,6 +12,7 @@ import {
   listDomainAccounts,
   updateDomainAccount,
 } from './adapters/v1051/accounts.js'
+import { clearDashboardCache, getDashboardOverview } from './adapters/v1051/dashboard.js'
 import {
   createCertificateAccount,
   deleteCertificateAccount,
@@ -107,6 +109,7 @@ import {
   updateDomainCategory,
 } from './adapters/v1051/domain-actions.js'
 import { getDomain, listDomains, listRecords } from './adapters/v1051/domains.js'
+import { listAuditLogs } from './adapters/v1051/logs.js'
 import {
   batchOperateMonitoringTasks,
   cleanMonitoringLogs,
@@ -169,6 +172,40 @@ import {
   updateScheduledTask,
 } from './adapters/v1051/schedules.js'
 import { sessionFromUpstream } from './adapters/v1051/session.js'
+import {
+  bindTotp,
+  changePassword,
+  disableTotp,
+  generateTotpEnrollment,
+  getProfileSecurity,
+  setLegacyTheme,
+} from './adapters/v1051/profile.js'
+import {
+  forwardCron,
+  forwardPublicApi,
+  forwardWorkerStatus,
+} from './adapters/v1051/public-compat.js'
+import {
+  getCronSettings,
+  getLoginSettings,
+  getNotificationSettings,
+  getProxySettings,
+  testNotification,
+  testProxy,
+  updateCronSettings,
+  updateLoginSettings,
+  updateNotificationSettings,
+  updateProxySettings,
+} from './adapters/v1051/system-settings.js'
+import {
+  createUser,
+  deleteUser,
+  getUser,
+  getUserFormOptions,
+  listUsers,
+  setUserStatus,
+  updateUser,
+} from './adapters/v1051/users.js'
 import { casLoginUrl, casLogoutUrl, CasClient, safeReturnTo } from './auth/cas-client.js'
 import { createCasSession, verifyCasSession } from './auth/cas.js'
 import { cookieValues, serializeHttpOnlyCookie } from './auth/cookies.js'
@@ -178,7 +215,7 @@ import type { CasProfile } from './contracts.js'
 import { DatabaseClient } from './database/client.js'
 import { ApiError, registerErrorHandler } from './errors.js'
 import { upstreamContext, upstreamRequestMetadata } from './request-context.js'
-import { DnsmgrClient, type FetchLike } from './upstream/client.js'
+import { DnsmgrClient, type FetchLike, type UpstreamResult } from './upstream/client.js'
 import { authenticationError } from './upstream/legacy.js'
 
 export type BuildAppOptions = {
@@ -194,6 +231,8 @@ const CallbackQuerySchema = z.object({
   returnTo: z.string().optional(),
 })
 const DomainIdParamsSchema = z.object({ domainId: z.coerce.number().int().positive() })
+const UserIdParamsSchema = z.object({ userId: z.coerce.number().int().positive() })
+const PublicApiIdParamsSchema = z.object({ id: z.coerce.number().int().positive() })
 const AccountIdParamsSchema = z.object({ accountId: z.coerce.number().int().positive() })
 const CategoryIdParamsSchema = z.object({ categoryId: z.coerce.number().int().positive() })
 const RecordIdParamsSchema = z.object({
@@ -221,6 +260,13 @@ function redirect(reply: FastifyReply, location: string) {
   return reply.code(302).header('location', location).send()
 }
 
+function relayUpstream(reply: FastifyReply, result: UpstreamResult) {
+  reply.code(result.status)
+  reply.header('content-type', result.contentType || 'text/plain; charset=utf-8')
+  if (result.location) reply.header('location', result.location)
+  return reply.send(result.text)
+}
+
 function cookieOptions(config: AppConfig, maxAge: number) {
   return {
     maxAge,
@@ -245,11 +291,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(helmet, {
     contentSecurityPolicy: false,
   })
+  await app.register(formbody)
 
   app.addHook('onClose', async () => database.close())
 
   app.addHook('onSend', async (request, reply) => {
-    if (request.url.startsWith('/api/web/')
+    if (request.url.startsWith('/api/')
       || request.url.startsWith('/cas/')
       || request.url.startsWith('/login')
       || request.url.startsWith('/logout')) {
@@ -335,6 +382,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         optimizeIpTyped: true,
         certificatesTyped: true,
         cloudflareTyped: true,
+        administrationTyped: true,
+        publicApiCompatible: true,
+        cronCompatible: true,
         actionTransport: true,
         actionCount: listLegacyOperations().length,
         databaseAccess: database.enabled,
@@ -391,6 +441,48 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   if (config.cas.loginPath !== '/login') app.get('/login', loginHandler)
   if (config.cas.loginPath !== '/cas/register') app.get('/cas/register', loginHandler)
   if (config.cas.logoutPath !== '/logout') app.get('/logout', logoutHandler)
+
+  const publicApiContext = (request: FastifyRequest) => upstreamRequestMetadata(request)
+  const relayPublicApi = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    path: string,
+  ) => relayUpstream(
+    reply,
+    await forwardPublicApi(client, publicApiContext(request), path, request.body),
+  )
+
+  app.post('/api/domain', async (request, reply) => relayPublicApi(request, reply, '/api/domain'))
+  app.post('/api/domain/:id', async (request, reply) => {
+    const params = PublicApiIdParamsSchema.parse(request.params)
+    return relayPublicApi(request, reply, `/api/domain/${params.id}`)
+  })
+  app.post('/api/record/data/:id', async (request, reply) => {
+    const params = PublicApiIdParamsSchema.parse(request.params)
+    return relayPublicApi(request, reply, `/api/record/data/${params.id}`)
+  })
+  for (const action of ['add', 'update', 'delete', 'status', 'remark', 'batch'] as const) {
+    app.post(`/api/record/${action}/:id`, async (request, reply) => {
+      const params = PublicApiIdParamsSchema.parse(request.params)
+      return relayPublicApi(request, reply, `/api/record/${action}/${params.id}`)
+    })
+  }
+  app.post('/api/cert/order', async (request, reply) => relayPublicApi(request, reply, '/api/cert/order'))
+
+  app.get('/cron', async (request, reply) => relayUpstream(
+    reply,
+    await forwardCron(client, publicApiContext(request), request.query),
+  ))
+  for (const path of ['/dmtask/status', '/optimizeip/status'] as const) {
+    app.route({
+      method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      url: path,
+      handler: async (request, reply) => relayUpstream(
+        reply,
+        await forwardWorkerStatus(client, publicApiContext(request), path),
+      ),
+    })
+  }
 
   app.get('/api/web/v1/session', async (request) => {
     const context = upstreamContext(request, config)
@@ -1827,6 +1919,160 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       ),
     }
   })
+
+  app.get('/api/web/v1/dashboard', async (request) => ({
+    code: 'OK',
+    data: await getDashboardOverview(client, config, upstreamContext(request, config)),
+  }))
+
+  app.post('/api/web/v1/dashboard/cache/clear', async (request) => ({
+    code: 'OK',
+    ...await clearDashboardCache(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/users/form', async (request) => ({
+    code: 'OK',
+    data: await getUserFormOptions(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/users', async (request) => {
+    const result = await listUsers(client, config, upstreamContext(request, config), request.query)
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/users', async (request) => ({
+    code: 'OK',
+    ...await createUser(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/users/:userId', async (request) => {
+    const params = UserIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getUser(client, config, upstreamContext(request, config), params.userId),
+    }
+  })
+
+  app.put('/api/web/v1/users/:userId', async (request) => {
+    const params = UserIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateUser(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.userId,
+        request.body,
+      ),
+    }
+  })
+
+  app.patch('/api/web/v1/users/:userId/status', async (request) => {
+    const params = UserIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setUserStatus(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.userId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/users/:userId', async (request) => {
+    const params = UserIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteUser(client, config, upstreamContext(request, config), params.userId),
+    }
+  })
+
+  app.get('/api/web/v1/logs', async (request) => {
+    const result = await listAuditLogs(client, config, upstreamContext(request, config), request.query)
+    return { code: 'OK', ...result }
+  })
+
+  app.get('/api/web/v1/profile/security', async (request) => ({
+    code: 'OK',
+    data: await getProfileSecurity(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/profile/password', async (request) => ({
+    code: 'OK',
+    ...await changePassword(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/profile/totp/enrollment', async (request) => ({
+    code: 'OK',
+    data: await generateTotpEnrollment(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/profile/totp', async (request) => ({
+    code: 'OK',
+    ...await bindTotp(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.delete('/api/web/v1/profile/totp', async (request) => ({
+    code: 'OK',
+    ...await disableTotp(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/profile/legacy-theme', async (request) => ({
+    code: 'OK',
+    ...await setLegacyTheme(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/system/login-settings', async (request) => ({
+    code: 'OK',
+    data: await getLoginSettings(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/system/login-settings', async (request) => ({
+    code: 'OK',
+    ...await updateLoginSettings(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/system/notifications', async (request) => ({
+    code: 'OK',
+    data: await getNotificationSettings(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/system/notifications', async (request) => ({
+    code: 'OK',
+    ...await updateNotificationSettings(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/system/notifications/test', async (request) => ({
+    code: 'OK',
+    ...await testNotification(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/system/proxy', async (request) => ({
+    code: 'OK',
+    data: await getProxySettings(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/system/proxy', async (request) => ({
+    code: 'OK',
+    ...await updateProxySettings(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/system/proxy/test', async (request) => ({
+    code: 'OK',
+    ...await testProxy(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/system/cron', async (request) => ({
+    code: 'OK',
+    data: await getCronSettings(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/system/cron', async (request) => ({
+    code: 'OK',
+    ...await updateCronSettings(client, config, upstreamContext(request, config), request.body),
+  }))
 
   app.get('/api/web/v1/actions', async () => ({
     code: 'OK',

@@ -1,7 +1,7 @@
 {
   "name": "dnsmgr-helper",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Compatibility BFF for a stock dnsmgr installation",
   "type": "module",
   "main": "dist/server.js",
@@ -24,6 +24,7 @@
     "compatibility"
   ],
   "dependencies": {
+    "@fastify/formbody": "^9.0.0",
     "@fastify/helmet": "^13.1.1",
     "fast-xml-parser": "^5.11.1",
     "fastify": "^5.12.1",

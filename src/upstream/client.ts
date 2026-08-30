@@ -4,6 +4,7 @@ import { ApiError } from '../errors.js'
 export type RequestContext = {
   cookie?: string
   forwardedFor?: string
+  userAgent?: string
   requestId?: string
   logger?: UpstreamLogger
 }
@@ -100,6 +101,7 @@ export class DnsmgrClient {
     }
     if (context.cookie) headers.set('cookie', context.cookie)
     if (context.forwardedFor) headers.set('x-forwarded-for', context.forwardedFor)
+    if (context.userAgent) headers.set('user-agent', context.userAgent)
     if (this.config.upstream.host) headers.set('host', this.config.upstream.host)
 
     const method = init.method ?? 'GET'

@@ -433,6 +433,77 @@
 
 删除公网主机名提交 `{ "hostname": "app.example.com", "path": "/api/*" }`。新增 CIDR 提交 `{ "network": "10.0.0.0/8", "comment": "private" }`，删除 CIDR/主机名路由提交 `{ "routeId": "..." }`。Tunnel Token 只由显式 Token 接口返回，不出现在列表或其他详情中。
 
+## 仪表盘、用户与日志
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/dashboard` | 总量、监控、优选 IP、证书/部署状态和服务器信息 |
+| `POST` | `/dashboard/cache/clear` | 清理原 dnsmgr 缓存 |
+| `GET` | `/users/form` | 用户域名权限选项 |
+| `GET/POST` | `/users` | 脱敏用户列表和新增用户 |
+| `GET/PUT/DELETE` | `/users/:userId` | 用户详情、完整更新和删除 |
+| `PATCH` | `/users/:userId/status` | 启用或封禁用户 |
+| `GET` | `/logs` | `userId`、`domain`、`q` 条件的操作日志分页 |
+
+用户列表不会返回密码哈希、API Key 或 TOTP 密钥。只有管理员显式打开编辑详情时，`GET /users/:userId` 才返回该用户现有的 `apiKey`；详情仍不返回密码哈希和 TOTP 密钥。新增用户示例：
+
+```json
+{
+  "username": "operator",
+  "password": "initial-password",
+  "apiEnabled": true,
+  "apiKey": "32-char-key",
+  "role": "user",
+  "permissions": ["example.com"]
+}
+```
+
+更新请求用 `resetPassword` 选择性重置密码，其余字段与新增一致；管理员角色的 `permissions` 会被清空。状态请求是 `{ "enabled": false }`。
+
+## 个人安全与系统设置
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/profile/security` | 本地凭据是否可用及 TOTP 状态 |
+| `PUT` | `/profile/password` | `{ "currentPassword", "newPassword" }` |
+| `POST` | `/profile/totp/enrollment` | 生成 TOTP 密钥和 `otpauth://` URI |
+| `PUT/DELETE` | `/profile/totp` | 绑定 `{ "secret", "code" }` 或关闭 TOTP |
+| `PUT` | `/profile/legacy-theme` | 保留原站皮肤写入能力；新前端主题不依赖它 |
+| `GET/PUT` | `/system/login-settings` | 原站图形验证码开关 |
+| `GET/PUT` | `/system/notifications` | 邮件、微信、Telegram、群机器人及自定义 Webhook |
+| `POST` | `/system/notifications/test` | 显式测试 `email`、`telegram`、`robot-webhook` 或 `custom-webhook` |
+| `GET/PUT` | `/system/proxy` | HTTP/HTTPS/SOCK4/SOCK5/SOCK5H 代理设置 |
+| `POST` | `/system/proxy/test` | 使用提交的代理参数测试连通性 |
+| `GET/PUT` | `/system/cron` | 执行模式、密钥、公开 URL 和五类任务运行时间 |
+
+外部托管登录启用时，`profile/security.localCredentialsAvailable` 为 `false`，前端应隐藏本地密码和 TOTP 表单；helper 也会拒绝这些无效写入，避免破坏托管会话。通知设置使用按通道完整对象、通道之间可局部更新的结构，例如：
+
+```json
+{
+  "telegram": {
+    "token": "bot-token",
+    "chatId": "123456",
+    "topicId": "",
+    "proxyMode": "system",
+    "customBaseUrl": ""
+  }
+}
+```
+
+系统写接口只接受各页面明确列出的固定键，不能通过它写入任意原站配置。
+
+## 原公开 API 与后台入口
+
+以下路径不使用 `/api/web/v1` 前缀，并保留原 dnsmgr 的响应格式：
+
+- `POST /api/domain`、`POST /api/domain/:id`；
+- `POST /api/record/data/:id` 以及 `add`、`update`、`delete`、`status`、`remark`、`batch`；
+- `POST /api/cert/order`；
+- `GET /cron?key=...`；
+- `ANY /dmtask/status`、`ANY /optimizeip/status`（与原 `Route::any` 一致）。
+
+公开 API 同时接受 `application/x-www-form-urlencoded` 和 JSON 对象，再以原表单字段转发 `uid`、`timestamp`、`sign` 及业务参数。签名仍由原 dnsmgr 按 `md5(uid + timestamp + apikey)` 验证，HTTP 状态与原 JSON 正文不转换。helper 只登记上述固定路径，不能用它访问任意原站控制器。
+
 ## 兼容动作入口
 
 `GET /actions` 与 `POST /actions/:operationId` 是开发迁移期的受控兜底，只接受 v1051 白名单中的固定动作和动态正整数路径参数。新前端应优先使用本文件中的类型化接口；每完成一个功能域，就不应再依赖该域的通用动作入口。

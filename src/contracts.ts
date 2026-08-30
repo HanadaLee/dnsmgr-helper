@@ -48,6 +48,146 @@ export type PageMeta = {
   total: number
 }
 
+export type DashboardOverview = {
+  totals: {
+    domains: number
+    monitoringTasks: number
+    certificateOrders: number
+    certificateDeployments: number
+  }
+  monitoring: {
+    workerRunning: boolean
+    active: number
+    healthy: number
+    failed: number
+  }
+  optimizeIp: {
+    active: number
+    succeeded: number
+    failed: number
+  }
+  certificates: {
+    issued: number
+    failed: number
+    expiringSoon: number
+    expired: number
+  }
+  deployments: {
+    pending: number
+    succeeded: number
+    failed: number
+  }
+  server: {
+    frameworkVersion?: string
+    phpVersion?: string
+    databaseVersion?: string
+    webServer?: string
+    serverTime?: string
+  }
+}
+
+export type UserSummary = {
+  id: number
+  username: string
+  role: 'administrator' | 'user' | 'unknown'
+  apiEnabled: boolean
+  totpEnabled: boolean
+  enabled: boolean
+  registeredAt?: string
+  lastLoginAt?: string
+}
+
+export type UserDetail = UserSummary & {
+  apiKey?: string
+  permissions: string[]
+}
+
+export type UserFormOptions = {
+  domains: string[]
+}
+
+export type AuditLogEntry = {
+  id: number
+  actor: { kind: 'administrator' } | { kind: 'user'; userId: number }
+  domain?: string
+  action: string
+  detail: string
+  occurredAt?: string
+}
+
+export type ProfileSecurity = {
+  localCredentialsAvailable: boolean
+  totpEnabled: boolean
+}
+
+export type TotpEnrollment = {
+  secret: string
+  provisioningUri: string
+}
+
+export type LoginSettings = {
+  graphicalVerificationEnabled: boolean
+  appliesToCurrentLogin: boolean
+}
+
+export type NotificationSettings = {
+  email: {
+    provider: 'smtp' | 'sendcloud' | 'aliyun'
+    smtpServer: string
+    smtpPort: number | null
+    sender: string
+    password: string
+    apiUser: string
+    apiKey: string
+    recipient: string
+  }
+  wechat: {
+    appToken: string
+    userId: string
+  }
+  telegram: {
+    token: string
+    chatId: string
+    topicId: string
+    proxyMode: 'off' | 'system' | 'custom'
+    customBaseUrl: string
+  }
+  robotWebhook: {
+    url: string
+    mention: string
+  }
+  customWebhook: {
+    url: string
+    method: 'GET' | 'POST' | 'PUT'
+    contentType: 'application/json' | 'application/x-www-form-urlencoded'
+    headers: string
+    body: string
+    contentFormat: 'html' | 'markdown' | 'text'
+  }
+}
+
+export type ProxySettings = {
+  server: string
+  port: number | null
+  username: string
+  password: string
+  type: 'http' | 'https' | 'sock4' | 'sock5' | 'sock5h'
+}
+
+export type CronSettings = {
+  executionMode: 'shell' | 'http'
+  accessKey: string
+  publicUrl?: string
+  shellCommand?: string
+  lastRuns: {
+    certificateRenewal: string | undefined
+    certificateDeployment: string | undefined
+    domainExpiryNotice: string | undefined
+    optimizeIp: string | undefined
+    scheduledDns: string | undefined
+  }
+}
+
 export type DomainSummary = {
   id: number
   name: string

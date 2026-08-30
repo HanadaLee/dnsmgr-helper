@@ -7,6 +7,7 @@ import type { RequestContext } from './upstream/client.js'
 export function upstreamRequestMetadata(request: FastifyRequest): RequestContext {
   return {
     forwardedFor: request.ip,
+    ...(request.headers['user-agent'] ? { userAgent: request.headers['user-agent'] } : {}),
     requestId: request.id,
     logger: request.log,
   }

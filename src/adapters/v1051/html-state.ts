@@ -140,6 +140,54 @@ export function namedElementAttribute(
   return plainText(match[1] ?? match[2] ?? match[3] ?? '') ?? ''
 }
 
+export function namedElementHasAttribute(
+  html: string,
+  tag: 'input' | 'select' | 'textarea',
+  elementName: string,
+  attribute: string,
+): boolean {
+  const escapedName = regexpEscape(elementName)
+  const element = new RegExp(
+    `<${tag}\\b(?=[^>]*\\bname\\s*=\\s*(?:["']${escapedName}["']|${escapedName}(?=\\s|>)))[^>]*>`,
+    'i',
+  ).exec(html)?.[0]
+  if (!element) return false
+  return new RegExp(`\\b${regexpEscape(attribute)}(?:\\s*=|(?=\\s|/?>))`, 'i').test(element)
+}
+
+export function elementIdHasAttribute(
+  html: string,
+  tag: 'input' | 'select' | 'textarea',
+  elementId: string,
+  attribute: string,
+): boolean {
+  const escapedId = regexpEscape(elementId)
+  const element = new RegExp(
+    `<${tag}\\b(?=[^>]*\\bid\\s*=\\s*(?:["']${escapedId}["']|${escapedId}(?=\\s|>)))[^>]*>`,
+    'i',
+  ).exec(html)?.[0]
+  if (!element) return false
+  return new RegExp(`\\b${regexpEscape(attribute)}(?:\\s*=|(?=\\s|/?>))`, 'i').test(element)
+}
+
+export function namedTextareaValue(html: string, elementName: string): string | undefined {
+  const escapedName = regexpEscape(elementName)
+  const value = new RegExp(
+    `<textarea\\b(?=[^>]*\\bname\\s*=\\s*(?:["']${escapedName}["']|${escapedName}(?=\\s|>)))[^>]*>([\\s\\S]*?)</textarea>`,
+    'i',
+  ).exec(html)?.[1]
+  if (value === undefined) return undefined
+  return plainText(value) ?? ''
+}
+
+export function tableCellAfterLabel(html: string, label: string): string | undefined {
+  const match = new RegExp(
+    `<t[dh]\\b[^>]*>\\s*${regexpEscape(label)}\\s*</t[dh]>\\s*<t[dh]\\b[^>]*>([\\s\\S]*?)</t[dh]>`,
+    'i',
+  ).exec(html)
+  return match ? plainText(match[1]) : undefined
+}
+
 export function namedSelectOptions(
   html: string,
   elementName: string,
