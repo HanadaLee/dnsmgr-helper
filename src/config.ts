@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { z } from 'zod'
 
 const OptionalNonEmptyString = z.preprocess(
@@ -5,67 +8,183 @@ const OptionalNonEmptyString = z.preprocess(
   z.string().min(1).optional(),
 )
 
-const BooleanString = z.enum(['true', 'false', '1', '0'])
-  .default('false')
-  .transform((value) => value === 'true' || value === '1')
+const OptionalUrl = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.url().optional(),
+)
 
-const EnvironmentSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  HOST: z.string().default('127.0.0.1'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3001),
-  DNSMGR_UPSTREAM_URL: z.string().url().default('http://127.0.0.1:8081/'),
-  DNSMGR_UPSTREAM_HOST: OptionalNonEmptyString,
-  DNSMGR_UPSTREAM_VERSION: z.string().regex(/^\d+$/).default('1051'),
-  DNSMGR_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(100).max(300_000).default(15_000),
-  DNSMGR_CAS_LOGIN_PATH: z.string().startsWith('/').default('/cas/login'),
-  DNSMGR_CAS_LOGOUT_PATH: z.string().startsWith('/').default('/cas/logout'),
-  DNSMGR_CAS_JWT_COOKIE: z.string().min(1).default('resty_cas_jwt'),
-  DNSMGR_CAS_JWT_SECRET: OptionalNonEmptyString,
-  DNSMGR_REQUIRE_CAS_JWT: BooleanString,
+const OptionalHeaderValue = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().min(1).refine((value) => !/[\r\n]/.test(value), '不能包含换行符').optional(),
+)
+
+const OptionalCookieDomain = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().regex(/^\.?[A-Za-z0-9.-]+$/).optional(),
+)
+
+const RelativePath = z.string().startsWith('/').refine(
+  (value) => !value.startsWith('//'),
+  '必须是站内绝对路径',
+)
+
+const CookieName = z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/)
+
+const CasAttributesSchema = z.object({
+  user: z.string().min(1).default('user'),
+  email: z.string().min(1).default('email'),
+  displayName: z.string().min(1).default('displayName'),
+  avatar: z.string().min(1).default('avatar'),
+}).default({
+  user: 'user',
+  email: 'email',
+  displayName: 'displayName',
+  avatar: 'avatar',
+})
+
+const ConfigSchema = z.object({
+  server: z.object({
+    environment: z.enum(['development', 'test', 'production']).default('production'),
+    host: z.string().min(1).default('127.0.0.1'),
+    port: z.number().int().min(1).max(65_535).default(3001),
+    publicUrl: z.url(),
+  }),
+  upstream: z.object({
+    url: z.url(),
+    host: OptionalNonEmptyString,
+    version: z.string().regex(/^\d+$/).default('1051'),
+    requestTimeoutMs: z.number().int().min(100).max(300_000).default(15_000),
+  }),
+  cas: z.object({
+    enabled: z.boolean().default(true),
+    baseUrl: OptionalUrl,
+    validationUrl: OptionalUrl,
+    validationHost: OptionalHeaderValue,
+    loginPath: RelativePath.default('/cas/login'),
+    callbackPath: RelativePath.default('/cas/callback'),
+    logoutPath: RelativePath.default('/cas/logout'),
+    logoutRedirectPath: RelativePath.default('/'),
+    sessionCookie: CookieName.default('dnsmgr_helper_session'),
+    sessionSecret: OptionalNonEmptyString,
+    sessionTtlSeconds: z.number().int().min(60).max(31_536_000).default(604_800),
+    requestTimeoutMs: z.number().int().min(100).max(300_000).default(15_000),
+    cookieSecure: z.boolean().default(true),
+    cookieSameSite: z.enum(['strict', 'lax', 'none']).default('lax'),
+    cookieDomain: OptionalCookieDomain,
+    attributes: CasAttributesSchema,
+  }),
+  legacySso: z.object({
+    adminUser: OptionalNonEmptyString,
+    managedPassword: OptionalNonEmptyString,
+    loginPath: RelativePath.default('/login'),
+    registerPath: RelativePath.default('/user/op/act/add'),
+    sessionCookie: CookieName.default('user_token'),
+  }),
+  database: z.object({
+    enabled: z.boolean().default(false),
+    host: z.string().min(1).default('127.0.0.1'),
+    port: z.number().int().min(1).max(65_535).default(3306),
+    socketPath: OptionalNonEmptyString,
+    user: z.string().min(1).default('dnsmgr_helper'),
+    password: z.string().default(''),
+    name: z.string().min(1).default('dnsmgr'),
+    connectionLimit: z.number().int().min(1).max(100).default(5),
+    connectTimeoutMs: z.number().int().min(100).max(300_000).default(10_000),
+    ssl: z.boolean().default(false),
+  }),
 }).superRefine((value, context) => {
-  if (value.DNSMGR_REQUIRE_CAS_JWT && !value.DNSMGR_CAS_JWT_SECRET) {
+  const authPaths = [value.cas.loginPath, value.cas.callbackPath, value.cas.logoutPath]
+  if (new Set(authPaths).size !== authPaths.length) {
+    context.addIssue({ code: 'custom', path: ['cas'], message: '登录、回调和退出路径不能重复' })
+  }
+  if (value.cas.sessionCookie === value.legacySso.sessionCookie) {
+    context.addIssue({ code: 'custom', path: ['cas', 'sessionCookie'], message: 'helper Session Cookie 不能与原 dnsmgr Cookie 同名' })
+  }
+  if (value.cas.cookieSameSite === 'none' && !value.cas.cookieSecure) {
+    context.addIssue({ code: 'custom', path: ['cas', 'cookieSecure'], message: 'SameSite=None 时必须启用 Secure' })
+  }
+  if (!value.cas.enabled) return
+
+  if (!value.cas.baseUrl) {
+    context.addIssue({ code: 'custom', path: ['cas', 'baseUrl'], message: '启用 CAS 时必须配置 baseUrl' })
+  }
+  if (!value.cas.sessionSecret || value.cas.sessionSecret.length < 32) {
     context.addIssue({
       code: 'custom',
-      path: ['DNSMGR_CAS_JWT_SECRET'],
-      message: 'DNSMGR_REQUIRE_CAS_JWT=true 时必须配置 CAS JWT 密钥',
+      path: ['cas', 'sessionSecret'],
+      message: '启用 CAS 时 sessionSecret 至少需要 32 个字符',
     })
+  }
+  if (!value.legacySso.adminUser) {
+    context.addIssue({ code: 'custom', path: ['legacySso', 'adminUser'], message: '启用 CAS 时必须配置管理员用户' })
+  }
+  if (!value.legacySso.managedPassword) {
+    context.addIssue({ code: 'custom', path: ['legacySso', 'managedPassword'], message: '启用 CAS 时必须配置托管密码' })
   }
 })
 
-export type AppConfig = {
-  nodeEnv: 'development' | 'test' | 'production'
-  host: string
-  port: number
-  upstreamUrl: URL
-  upstreamHost?: string
-  upstreamVersion: string
-  requestTimeoutMs: number
-  casLoginPath: string
-  casLogoutPath: string
-  casJwtCookie: string
-  casJwtSecret?: string
-  requireCasJwt: boolean
+type ParsedConfig = z.output<typeof ConfigSchema>
+
+export type AppConfig = Omit<ParsedConfig, 'server' | 'upstream' | 'cas'> & {
+  sourcePath?: string
+  server: Omit<ParsedConfig['server'], 'publicUrl'> & { publicUrl: URL }
+  upstream: Omit<ParsedConfig['upstream'], 'url'> & { url: URL }
+  cas: Omit<ParsedConfig['cas'], 'baseUrl' | 'validationUrl'> & {
+    baseUrl?: URL
+    validationUrl?: URL
+  }
 }
 
-export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = EnvironmentSchema.parse(environment)
-  const upstreamUrl = new URL(parsed.DNSMGR_UPSTREAM_URL)
-  if (!upstreamUrl.pathname.endsWith('/')) upstreamUrl.pathname += '/'
+function normalizedBaseUrl(value: string): URL {
+  const url = new URL(value)
+  url.hash = ''
+  url.search = ''
+  if (!url.pathname.endsWith('/')) url.pathname += '/'
+  return url
+}
 
+export function parseConfig(input: unknown, sourcePath?: string): AppConfig {
+  const parsed = ConfigSchema.parse(input)
+  const { baseUrl, validationUrl, ...cas } = parsed.cas
   return {
-    nodeEnv: parsed.NODE_ENV,
-    host: parsed.HOST,
-    port: parsed.PORT,
-    upstreamUrl,
-    ...(parsed.DNSMGR_UPSTREAM_HOST ? { upstreamHost: parsed.DNSMGR_UPSTREAM_HOST } : {}),
-    upstreamVersion: parsed.DNSMGR_UPSTREAM_VERSION,
-    requestTimeoutMs: parsed.DNSMGR_REQUEST_TIMEOUT_MS,
-    casLoginPath: parsed.DNSMGR_CAS_LOGIN_PATH,
-    casLogoutPath: parsed.DNSMGR_CAS_LOGOUT_PATH,
-    casJwtCookie: parsed.DNSMGR_CAS_JWT_COOKIE,
-    requireCasJwt: parsed.DNSMGR_REQUIRE_CAS_JWT,
-    ...(parsed.DNSMGR_CAS_JWT_SECRET
-      ? { casJwtSecret: parsed.DNSMGR_CAS_JWT_SECRET }
-      : {}),
+    ...(sourcePath ? { sourcePath } : {}),
+    server: {
+      ...parsed.server,
+      publicUrl: normalizedBaseUrl(parsed.server.publicUrl),
+    },
+    upstream: {
+      ...parsed.upstream,
+      url: normalizedBaseUrl(parsed.upstream.url),
+    },
+    cas: {
+      ...cas,
+      ...(baseUrl ? { baseUrl: normalizedBaseUrl(baseUrl) } : {}),
+      ...(validationUrl
+        ? { validationUrl: normalizedBaseUrl(validationUrl) }
+        : {}),
+    },
+    legacySso: parsed.legacySso,
+    database: parsed.database,
   }
+}
+
+export async function loadConfig(configPath = process.env.DNSMGR_HELPER_CONFIG): Promise<AppConfig> {
+  const resolvedPath = path.resolve(configPath || 'config/dnsmgr-helper.json')
+  let source: string
+  try {
+    source = await readFile(resolvedPath, 'utf8')
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`无法读取 dnsmgr-helper 配置文件 ${resolvedPath}: ${reason}`)
+  }
+
+  let input: unknown
+  try {
+    input = JSON.parse(source) as unknown
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`dnsmgr-helper 配置文件不是有效 JSON: ${reason}`)
+  }
+
+  return parseConfig(input, resolvedPath)
 }

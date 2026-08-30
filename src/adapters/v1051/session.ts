@@ -69,12 +69,12 @@ export function sessionFromUpstream(
       },
       sso: {
         profileVerified: Boolean(casProfile),
-        loginPath: config.casLoginPath,
-        logoutPath: config.casLogoutPath,
+        loginPath: config.cas.loginPath,
+        logoutPath: config.cas.logoutPath,
       },
       upstream: {
-        configuredVersion: config.upstreamVersion,
-        adapter: `v${config.upstreamVersion}`,
+        configuredVersion: config.upstream.version,
+        adapter: `v${config.upstream.version}`,
       },
     }
   }
@@ -109,13 +109,13 @@ export function sessionFromUpstream(
     capabilities: capabilitiesFromDashboard(html),
     sso: {
       profileVerified: Boolean(casProfile),
-      loginPath: config.casLoginPath,
-      logoutPath: config.casLogoutPath,
+      loginPath: config.cas.loginPath,
+      logoutPath: config.cas.logoutPath,
     },
     upstream: {
-      configuredVersion: config.upstreamVersion,
+      configuredVersion: config.upstream.version,
       ...(detectedVersion ? { detectedVersion } : {}),
-      adapter: `v${config.upstreamVersion}`,
+      adapter: `v${config.upstream.version}`,
     },
   }
 }

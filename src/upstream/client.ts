@@ -61,8 +61,8 @@ export class DnsmgrClient {
       throw new ApiError(500, 'INVALID_UPSTREAM_PATH', '拒绝访问非站内上游路径')
     }
 
-    const url = new URL(path.slice(1), this.config.upstreamUrl)
-    if (url.origin !== this.config.upstreamUrl.origin) {
+    const url = new URL(path.slice(1), this.config.upstream.url)
+    if (url.origin !== this.config.upstream.url.origin) {
       throw new ApiError(500, 'INVALID_UPSTREAM_ORIGIN', '拒绝访问未配置的上游地址')
     }
 
@@ -71,7 +71,7 @@ export class DnsmgrClient {
     headers.set('x-requested-with', 'XMLHttpRequest')
     if (context.cookie) headers.set('cookie', context.cookie)
     if (context.forwardedFor) headers.set('x-forwarded-for', context.forwardedFor)
-    if (this.config.upstreamHost) headers.set('host', this.config.upstreamHost)
+    if (this.config.upstream.host) headers.set('host', this.config.upstream.host)
 
     let response: Response
     try {
@@ -79,7 +79,7 @@ export class DnsmgrClient {
         ...init,
         headers,
         redirect: 'manual',
-        signal: AbortSignal.timeout(this.config.requestTimeoutMs),
+        signal: AbortSignal.timeout(this.config.upstream.requestTimeoutMs),
       })
     } catch (error) {
       throw new ApiError(502, 'UPSTREAM_UNAVAILABLE', '无法连接原 dnsmgr 服务', {

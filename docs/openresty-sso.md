@@ -1,124 +1,101 @@
-# OpenResty / CAS 对接
+# helper 接管 CAS 后的 OpenResty 对接
 
-## 结论
+## 新的职责边界
 
-现有三个组成部分无需移入 helper，也不应由 Node.js 重写：
+OpenResty 不再加载或执行站点级 CAS/SSO 逻辑，只负责 TLS、反向代理、静态资源和原 dnsmgr 私有入口。以下职责全部由 `dnsmgr-helper` 完成：
 
-- `http_dns.hanada.info.conf` 继续维护公开入口与 Cookie 域；
-- `auth_sso_adapter_dnsmgr.lua` 继续把 CAS 用户映射为原 dnsmgr 用户，并取得 `user_token`；
-- `auth_cas.lua` 继续签发和校验 `resty_cas_jwt`。
-
-helper 是第二层翻译器：它验证 CAS 证明（生产建议强制），再把同一请求的 `user_token` 交给原 dnsmgr 验证。两层任一失效都返回 JSON 401。
+- 生成 CAS 登录和退出地址；
+- 使用回调的 Ticket 调用 `serviceValidate`；
+- 解析 CAS 用户属性并签发 `dnsmgr_helper_session`；
+- 使用托管密码登录原 dnsmgr；
+- 用户不存在时，用管理员 Cookie 调用原注册控制器；
+- 签发浏览器侧的原 `user_token`；
+- 在每个 Web API 请求上验证 helper Session，并只向原系统转发 `user_token`。
 
 ```text
 浏览器
-  ├─ /cas/login ──> 现有 auth_sso_adapter ──> 原 dnsmgr /login
-  │                                      └─> Set-Cookie: user_token
-  └─ /api/web/v1/* ──> dnsmgr-helper ──> 私有原版入口 ──> 原 dnsmgr
-       │                    │                                  │
-       │ CAS JWT            └─ 只翻译白名单接口                └─ 最终业务权限
-       └─ user_token 全程保持同源 Cookie
+  ├─ /cas/login ───────────────> dnsmgr-helper ──302──> CAS
+  ├─ /cas/callback?ticket=... ─> dnsmgr-helper
+  │                                  ├─ CAS serviceValidate
+  │                                  ├─ 原 dnsmgr 登录/必要时注册
+  │                                  └─ Set-Cookie: helper Session + user_token
+  └─ /api/web/v1/* ────────────> dnsmgr-helper ──> 原 dnsmgr 白名单控制器
+
+OpenResty：只转发以上路径，不解析 Ticket、不签 JWT、不托管用户密码。
 ```
 
-## 必须保留的公开路径
+## 网关需要移除的站点逻辑
 
-以下路径应继续使用当前网关逻辑，不能交给 SPA 或 helper：
+切换完成后，`dns.hanada.info` 站点不再需要以下配置：
 
-- `/login`
-- `/logout`
-- `/cas/login`
-- `/cas/register`
-- `/cas/logout`
-- `/user/op/act/edit`
-- `/setpwd`
+- `auth_cas_idp_url` 和站点级 `auth_cas authorize/logout`；
+- `auth_sso_adapter dnsmgr` 及全部 `auth_sso_adapter_dnsmgr_*`；
+- `/cas/login`、`/cas/register` 的 Lua access handler；
+- `/login` 到 `/cas/login` 的网关重定向；
+- `/logout` 到 CAS logout 的网关 header 改写；
+- 为 SSO 注入的 `$remote_user_*` 变量。
 
-原版 `/api` 也可以继续保留；新的浏览器 BFF 使用更具体的 `/api/web/v1/`，由 nginx 最长前缀匹配到 helper。
+全局 Lua 模块可以继续供其他站点使用；本次只要求 DNS 站点不再调用它们。
 
-## 推荐上游拓扑
+## 需要保留的网关路径
 
-不要让 helper 通过最终的 SPA `/` 再访问公开站点，否则切换前端后会形成错误回环。应给原 dnsmgr 增加一个仅回环地址可访问的路径前缀，或直接提供一个仅内网监听的 HTTP 端口。
+把 [`deploy/openresty-locations.conf.example`](../deploy/openresty-locations.conf.example) 合并到站点：
 
-路径前缀方案示例：
+- `/api/web/v1/`、`/cas/`、`/login`、`/logout` 转发到 helper；
+- `/__dnsmgr_legacy/` 只允许回环访问，并转发到原 dnsmgr；
+- 原 `/api` 可暂时保留给旧页面；
+- `/setpwd`、`/system/loginset` 可以继续做普通外部跳转，它们不再参与认证。
 
-```nginx
-location ^~ /__dnsmgr_legacy/ {
-    allow 127.0.0.1;
-    allow ::1;
-    deny all;
+helper 应继续只监听回环地址。私有 legacy 前缀不能暴露给外网。
 
-    rewrite ^/__dnsmgr_legacy/(.*)$ /$1 break;
-    set $no_cache 1;
-    include snippet/http_proxy_select_pass.conf;
+## 静态配置对应关系
+
+网关不再保存 CAS 密钥或 dnsmgr 托管密码。它们应填写在被 Git 忽略的 `config/dnsmgr-helper.json`：
+
+```json
+{
+  "cas": {
+    "enabled": true,
+    "baseUrl": "https://cas.example.com/cas/organization/application/",
+    "sessionSecret": "<至少32字符随机值>"
+  },
+  "legacySso": {
+    "adminUser": "<dnsmgr管理员>",
+    "managedPassword": "<托管密码>"
+  }
 }
 ```
 
-对应 helper 配置：
+以上只是字段示意，不是完整配置文件。应在完整 JSON 上修改，并运行 `npm run config:check -- config/dnsmgr-helper.json`。
 
-```dotenv
-DNSMGR_UPSTREAM_URL=http://127.0.0.1:<gateway-port>/__dnsmgr_legacy/
-DNSMGR_UPSTREAM_HOST=dns.hanada.info
-```
+## 无中断迁移顺序
 
-helper 会保留配置中的路径前缀。例如对稳定 API `/domains` 的请求最终会访问私有入口 `/__dnsmgr_legacy/domain/data`。私有入口本身不执行 CAS 跳转，但原 dnsmgr 中间件仍会严格验证转发的 `user_token`。
+1. 填写 helper 静态配置，但暂时保持 `cas.enabled=false`；
+2. 确认 helper `/healthz`、`/readyz` 和只读 API 可访问；
+3. 填写 `sessionSecret`、管理员和托管密码，把 `cas.enabled` 改为 `true`；
+4. 在本机验证 `/cas/login` 能完成回调并获得两个 Cookie；
+5. 再把 DNS 站点的 CAS、login、logout 路径切到 helper，同时删除站点级 Lua SSO；
+6. 验证登录、自动创建用户、退出、域名和解析记录；
+7. 最后再切换 `/next/` 或根路径的新前端。
 
-## helper 的公开入口
+在第 4 步完成前直接删除网关 SSO 会造成登录中断，因此仓库中的实际站点配置不应提前切换。
 
-在现有 `location /api` 之外增加更具体的前缀：
+## 前端发布
 
-```nginx
-location ^~ /api/web/v1/ {
-    set $no_cache 1;
-
-    proxy_http_version 1.1;
-    proxy_pass http://127.0.0.1:3001;
-    proxy_set_header Host $host;
-    proxy_set_header Cookie $http_cookie;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $edge_request_scheme;
-    proxy_set_header X-Request-ID $request_id;
-}
-```
-
-不要在这个 location 上直接使用会发出 302 的 `auth_cas authorize`。helper 在 `DNSMGR_REQUIRE_CAS_JWT=true` 时自行校验同一个 JWT，并以 JSON 401 返回 `/cas/login`，避免 `fetch()` 静默跟随到 CAS HTML 页面。
-
-helper 应只监听回环地址，私有原版入口也必须限制回环访问。
-
-## 前端切换
-
-建议分两步发布：
-
-1. 将前端以 `VITE_BASE_PATH=/next/` 构建，挂载到 `/next/` 做只读联调，保留当前 `location /`；
-2. 联调通过后以 `VITE_BASE_PATH=/` 重建，用 SPA `try_files` 替换当前根页面代理。
-
-可直接合并的完整 location 片段见 [`deploy/openresty-locations.conf.example`](../deploy/openresty-locations.conf.example)。阶段性部署应把构建产物放入 `/srv/dnsmgr-frontend/next/`；最终切换示例使用 `/srv/dnsmgr-frontend/current/`，两者不会覆盖原 PHP 源码。
-
-最终根路径示意：
+灰度版本仍可使用 `VITE_BASE_PATH=/next/`。最终根路径不再需要 `auth_cas authorize`：
 
 ```nginx
 location ^~ /assets/ {
-    root /srv/dnsmgr-frontend;
+    root /srv/dnsmgr-frontend/current;
     try_files $uri =404;
     expires 30d;
 }
 
 location / {
     set $no_cache 1;
-    set $remote_user_avatar "";
-    when !realip_remote_is_unix_domain {
-        lua_config auth_cas authorize;
-    }
-
-    root /srv/dnsmgr-frontend;
+    root /srv/dnsmgr-frontend/current;
     try_files $uri /index.html;
 }
 ```
 
-`location ^~ /assets/` 很重要：当前配置中已有匹配 `.js/.css` 的正则 location，没有 `^~` 时新前端静态资源会被送到原 dnsmgr。
-
-## 密钥和权限边界
-
-- 不要把 CAS JWT 密钥或 dnsmgr 托管密码写入两个 Git 仓库；使用服务环境或密钥管理器注入。
-- `DNSMGR_REQUIRE_CAS_JWT=true` 时，缺失、过期或签名错误的 CAS Cookie 会在访问原版服务前被拒绝。
-- CAS claim 只用于头像、显示名和邮箱；域名可见范围、管理员级别和记录权限仍完全来自原 dnsmgr。
-- helper 只允许源码中声明的固定上游路径，不能作为通用反向代理使用。
-- 当前写能力为 `false`，因此不会通过兼容层修改真实 DNS 数据。
+未登录前端请求 API 时会收到 JSON 401，其中的 `details.loginPath` 指向 helper 的 `/cas/login`；不会再由 OpenResty 把 `fetch()` 重定向到 CAS HTML。

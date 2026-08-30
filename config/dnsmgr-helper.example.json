@@ -1,0 +1,56 @@
+{
+  "server": {
+    "environment": "production",
+    "host": "127.0.0.1",
+    "port": 3001,
+    "publicUrl": "https://dns.example.com/"
+  },
+  "upstream": {
+    "url": "http://127.0.0.1:8081/__dnsmgr_legacy/",
+    "host": "dns.example.com",
+    "version": "1051",
+    "requestTimeoutMs": 15000
+  },
+  "cas": {
+    "enabled": false,
+    "baseUrl": "https://cas.example.com/cas/organization/application/",
+    "validationUrl": "",
+    "validationHost": "",
+    "loginPath": "/cas/login",
+    "callbackPath": "/cas/callback",
+    "logoutPath": "/cas/logout",
+    "logoutRedirectPath": "/",
+    "sessionCookie": "dnsmgr_helper_session",
+    "sessionSecret": "",
+    "sessionTtlSeconds": 604800,
+    "requestTimeoutMs": 15000,
+    "cookieSecure": true,
+    "cookieSameSite": "lax",
+    "cookieDomain": "",
+    "attributes": {
+      "user": "user",
+      "email": "email",
+      "displayName": "displayName",
+      "avatar": "avatar"
+    }
+  },
+  "legacySso": {
+    "adminUser": "",
+    "managedPassword": "",
+    "loginPath": "/login",
+    "registerPath": "/user/op/act/add",
+    "sessionCookie": "user_token"
+  },
+  "database": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 3306,
+    "socketPath": "",
+    "user": "dnsmgr_helper",
+    "password": "",
+    "name": "dnsmgr",
+    "connectionLimit": 5,
+    "connectTimeoutMs": 10000,
+    "ssl": false
+  }
+}

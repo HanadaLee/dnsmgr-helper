@@ -43,6 +43,6 @@ export function isLoginRedirect(result: UpstreamResult): boolean {
 
 export function authenticationError(config: AppConfig): ApiError {
   return new ApiError(401, 'AUTH_REQUIRED', '请通过统一身份认证登录', {
-    loginPath: config.casLoginPath,
+    loginPath: config.cas.loginPath,
   })
 }

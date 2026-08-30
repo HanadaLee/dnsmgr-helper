@@ -1,5 +1,5 @@
-# Fragment only. Merge these locations into the existing dns.hanada.info server.
-# Keep the existing exact /login, /logout, /cas/* and user-edit locations.
+# Fragment only. Merge into the existing dns.hanada.info server.
+# OpenResty performs no CAS/JWT/managed-password work for these routes.
 
 location ^~ /api/web/v1/ {
     set $no_cache 1;
@@ -9,10 +9,48 @@ location ^~ /api/web/v1/ {
     proxy_set_header Cookie $http_cookie;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $edge_request_scheme;
+    proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Request-ID $request_id;
 }
 
-# Private legacy bridge used only by dnsmgr-helper.
+location ^~ /cas/ {
+    set $no_cache 1;
+    proxy_http_version 1.1;
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header Cookie $http_cookie;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $edge_request_scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Request-ID $request_id;
+}
+
+location = /login {
+    set $no_cache 1;
+    proxy_http_version 1.1;
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header Cookie $http_cookie;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $edge_request_scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Request-ID $request_id;
+}
+
+location = /logout {
+    set $no_cache 1;
+    proxy_http_version 1.1;
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header Cookie $http_cookie;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $edge_request_scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Request-ID $request_id;
+}
+
+# Private bridge used only by dnsmgr-helper. The helper static config points
+# upstream.url at this prefix and sets upstream.host to the public DNS host.
 location ^~ /__dnsmgr_legacy/ {
     allow 127.0.0.1;
     allow ::1;
@@ -24,8 +62,7 @@ location ^~ /__dnsmgr_legacy/ {
 }
 
 # Staged frontend. Build with VITE_BASE_PATH=/next/ and copy dist/* to
-# /srv/dnsmgr-frontend/next/. These ^~ locations also bypass any legacy
-# regular-expression location for .js or .css files.
+# /srv/dnsmgr-frontend/next/.
 location ^~ /next/assets/ {
     root /srv/dnsmgr-frontend;
     try_files $uri =404;
@@ -38,9 +75,7 @@ location ^~ /next/ {
     try_files $uri /next/index.html;
 }
 
-# Final cut-over example. Enable this pair only after replacing the existing
-# root location and copying a VITE_BASE_PATH=/ build into this directory.
-# Keep the exact SSO/login locations above it in the same server block.
+# Final frontend cut-over. No auth_cas directive is needed here.
 #
 # location ^~ /assets/ {
 #     root /srv/dnsmgr-frontend/current;
@@ -50,11 +85,6 @@ location ^~ /next/ {
 #
 # location / {
 #     set $no_cache 1;
-#     set $remote_user_avatar "";
-#     when !realip_remote_is_unix_domain {
-#         lua_config auth_cas authorize;
-#     }
-#
 #     root /srv/dnsmgr-frontend/current;
 #     try_files $uri /index.html;
 # }
