@@ -1,0 +1,107 @@
+# Complete EdgeResty reference for dns.hanada.info.
+# Keep the three local ports aligned with the deployed dnsmgr, helper and
+# frontend services.
+server {
+    server_name dns.hanada.info;
+
+    include snippet/http_channel_default_listen.conf;
+    include snippet/http_channel_global_config.conf;
+
+    var $ssl_certificate_name set hanada.info;
+    ssl_certificate /usr/local/cert/domain_${ssl_certificate_name}.crt;
+    ssl_certificate_key /usr/local/cert/domain_${ssl_certificate_name}.key;
+    ssl_certificate /usr/local/cert/domain_${ssl_certificate_name}_ecc.crt;
+    ssl_certificate_key /usr/local/cert/domain_${ssl_certificate_name}_ecc.key;
+    include snippet/ssl_common_ciphers.conf;
+
+    lua_config force_https_redirect on;
+
+    # Keep the existing EdgeResty parent/origin selection. The server-level
+    # local target remains the stock dnsmgr instance for the temporary /api
+    # compatibility route. Locations below override it for helper/frontend.
+    include snippet/http_parent_map_cnhksp.conf;
+    lua_config proxy_select_origin https://as-hk-hcw-tencent-307.ipv4.hanada.ltd;
+    condition is_origin str_eq $hostname as-hk-hcw-tencent-307;
+    when is_origin {
+        lua_config proxy_select_mode local;
+    }
+    lua_config proxy_select_local http://127.0.0.1:19101;
+
+    when is_origin {
+        proxy_request_header_control clear Accept-Encoding;
+    }
+    hsts on;
+    proxy_read_timeout 180s;
+
+    location = /robots.txt {
+        default_type text/plain;
+        return 200 "User-Agent: *\nDisallow: /";
+    }
+
+    location = /setpwd {
+        return 302 https://cas.hanada.info/account;
+    }
+
+    location = /system/loginset {
+        return 302 https://cas.hanada.info/organizations/hanada;
+    }
+
+    # dnsmgr-helper owns CAS, the helper session and the compatibility API.
+    # No auth_cas or auth_sso_adapter directive is used by this server.
+    location ^~ /api/web/v1/ {
+        set $no_cache 1;
+        include snippet/http_json_error_pages.conf;
+        lua_config proxy_select_local http://127.0.0.1:19102;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    location ^~ /cas/ {
+        lua_config client_cache bust;
+        set $no_cache 1;
+        include snippet/http_json_error_pages.conf;
+        lua_config proxy_select_local http://127.0.0.1:19102;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    location = /login {
+        lua_config client_cache bust;
+        set $no_cache 1;
+        lua_config proxy_select_local http://127.0.0.1:19102;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    location = /logout {
+        lua_config client_cache bust;
+        set $no_cache 1;
+        lua_config proxy_select_local http://127.0.0.1:19102;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    # Temporary compatibility for the stock dnsmgr API. Remove this location
+    # after every required operation has a helper-owned stable endpoint.
+    location /api {
+        include snippet/http_json_error_pages.conf;
+        set $no_cache 1;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    # Vite emits content-hashed files below /assets/. EdgeResty may cache them;
+    # the frontend container on 19103 remains responsible for file lookup.
+    location ^~ /assets/ {
+        lua_config proxy_select_local http://127.0.0.1:19103;
+        proxy_cache_lock_timeout 5s;
+        proxy_cache_valid 200 206 365d;
+        lua_config client_cache immutable;
+        response_header_control clear Set-Cookie;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    # All remaining page routes go to the frontend container. Its inner nginx
+    # performs the SPA fallback to index.html.
+    location / {
+        lua_config proxy_select_local http://127.0.0.1:19103;
+        lua_config client_cache bust;
+        set $no_cache 1;
+        include snippet/http_proxy_select_pass.conf;
+    }
+}

@@ -39,7 +39,7 @@ OpenResty：只转发以上路径，不解析 Ticket、不签 JWT、不托管用
 
 ## 需要保留的网关路径
 
-把 [`deploy/openresty-locations.conf.example`](../deploy/openresty-locations.conf.example) 合并到站点：
+以现有 DNS 站点为基础审核并采用完整的 [`deploy/http_dns.hanada.info.conf.example`](../deploy/http_dns.hanada.info.conf.example)：
 
 - `/api/web/v1/`、`/cas/`、`/login`、`/logout` 转发到 helper；
 - 原 `/api` 可暂时保留给旧页面；
@@ -85,19 +85,23 @@ helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原
 
 ## 前端发布
 
-灰度版本仍可使用 `VITE_BASE_PATH=/next/`。最终根路径不再需要 `auth_cas authorize`：
+最终根路径不再需要 `auth_cas authorize`。外层 EdgeResty 使用定制的 `proxy_select` 路由，把静态资源和页面请求发送到映射在 `19103` 的前端容器：
 
 ```nginx
 location ^~ /assets/ {
-    root /srv/dnsmgr-frontend/current;
-    try_files $uri =404;
-    expires 30d;
+    lua_config proxy_select_local http://127.0.0.1:19103;
+    proxy_cache_lock_timeout 5s;
+    proxy_cache_valid 200 206 365d;
+    lua_config client_cache immutable;
+    response_header_control clear Set-Cookie;
+    include snippet/http_proxy_select_pass.conf;
 }
 
 location / {
+    lua_config proxy_select_local http://127.0.0.1:19103;
+    lua_config client_cache bust;
     set $no_cache 1;
-    root /srv/dnsmgr-frontend/current;
-    try_files $uri /index.html;
+    include snippet/http_proxy_select_pass.conf;
 }
 ```
 

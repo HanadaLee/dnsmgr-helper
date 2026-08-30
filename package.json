@@ -1,7 +1,7 @@
 {
   "name": "dnsmgr-helper",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Compatibility BFF for a stock dnsmgr installation",
   "type": "module",
   "main": "dist/server.js",

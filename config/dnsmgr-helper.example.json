@@ -2,7 +2,7 @@
   "server": {
     "environment": "production",
     "host": "127.0.0.1",
-    "port": 3001,
+    "port": 19102,
     "publicUrl": "https://dns.example.com/"
   },
   "upstream": {
