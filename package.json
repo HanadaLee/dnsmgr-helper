@@ -1,0 +1,37 @@
+{
+  "name": "dnsmgr-helper",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Compatibility BFF for a stock dnsmgr installation",
+  "type": "module",
+  "main": "dist/server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "mock:upstream": "tsx test/fixtures/mock-upstream.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file-if-exists=.env dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "dnsmgr",
+    "bff",
+    "compatibility"
+  ],
+  "dependencies": {
+    "@fastify/helmet": "^13.1.1",
+    "fastify": "^5.12.1",
+    "jose": "^6.2.10",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

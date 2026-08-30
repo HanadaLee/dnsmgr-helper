@@ -1,0 +1,60 @@
+# Fragment only. Merge these locations into the existing dns.hanada.info server.
+# Keep the existing exact /login, /logout, /cas/* and user-edit locations.
+
+location ^~ /api/web/v1/ {
+    set $no_cache 1;
+    proxy_http_version 1.1;
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header Cookie $http_cookie;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $edge_request_scheme;
+    proxy_set_header X-Request-ID $request_id;
+}
+
+# Private legacy bridge used only by dnsmgr-helper.
+location ^~ /__dnsmgr_legacy/ {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+
+    rewrite ^/__dnsmgr_legacy/(.*)$ /$1 break;
+    set $no_cache 1;
+    include snippet/http_proxy_select_pass.conf;
+}
+
+# Staged frontend. Build with VITE_BASE_PATH=/next/ and copy dist/* to
+# /srv/dnsmgr-frontend/next/. These ^~ locations also bypass any legacy
+# regular-expression location for .js or .css files.
+location ^~ /next/assets/ {
+    root /srv/dnsmgr-frontend;
+    try_files $uri =404;
+    expires 30d;
+}
+
+location ^~ /next/ {
+    set $no_cache 1;
+    root /srv/dnsmgr-frontend;
+    try_files $uri /next/index.html;
+}
+
+# Final cut-over example. Enable this pair only after replacing the existing
+# root location and copying a VITE_BASE_PATH=/ build into this directory.
+# Keep the exact SSO/login locations above it in the same server block.
+#
+# location ^~ /assets/ {
+#     root /srv/dnsmgr-frontend/current;
+#     try_files $uri =404;
+#     expires 30d;
+# }
+#
+# location / {
+#     set $no_cache 1;
+#     set $remote_user_avatar "";
+#     when !realip_remote_is_unix_domain {
+#         lua_config auth_cas authorize;
+#     }
+#
+#     root /srv/dnsmgr-frontend/current;
+#     try_files $uri /index.html;
+# }
