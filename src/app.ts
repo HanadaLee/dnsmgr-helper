@@ -199,7 +199,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   app.get('/api/web/v1/session', async (request) => {
     const context = upstreamContext(request, config)
-    const upstream = await client.get('/', context)
+    const upstream = await client.getHtml('/', context)
     const casProfile = casProfiles.get(request)
     return {
       code: 'OK',

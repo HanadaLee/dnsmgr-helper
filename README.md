@@ -115,7 +115,7 @@ docker compose ps
 也可以在本地构建后指定镜像：
 
 ```powershell
-docker build --build-arg APP_VERSION=0.1.4 -t dnsmgr-helper:local .
+docker build --build-arg APP_VERSION=0.1.5 -t dnsmgr-helper:local .
 $env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
 docker compose up -d
 ```
@@ -124,7 +124,7 @@ Compose 使用 Linux host 网络。这与静态配置的回环监听方式配套
 
 镜像和 Compose 健康检查都读取同一个 `dnsmgr-helper.json`，不会固定使用 `3001`。当前生产示例把 helper 配置为 `127.0.0.1:19102`；修改 `server.host` 或 `server.port` 后，需要同步修改 `deploy/http_dns.hanada.info.conf.example` 中四个 helper 路由的 `proxy_select_local`。`/healthz` 只用于容器存活检查；数据库实际可用性仍由 `/readyz` 判断。
 
-helper 访问原 dnsmgr 时会分别输出 `dnsmgr upstream request` 和 `dnsmgr upstream response` 日志，包含父请求 ID、方法、上游路径、是否携带会话、响应状态、耗时、响应大小和重定向路径。日志不会记录 Cookie 值、托管密码、POST 表单或响应正文。
+helper 访问原 dnsmgr 时会分别输出 `dnsmgr upstream request` 和 `dnsmgr upstream response` 日志，包含父请求 ID、方法、上游路径、请求模式、是否携带会话、响应状态、耗时、响应大小和重定向路径。日志不会记录 Cookie 值、托管密码、POST 表单或响应正文。会话接口探测 dnsmgr 首页时使用 `document` 模式，不会携带 `X-Requested-With`；登录和数据接口继续使用 `ajax` 模式。
 
 ## GitLab CI 镜像发布
 

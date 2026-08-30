@@ -24,6 +24,8 @@ export type UpstreamResult = {
 
 export type FetchLike = typeof fetch
 
+type RequestMode = 'ajax' | 'document'
+
 function setCookieValues(headers: Headers): string[] {
   const enhancedHeaders = headers as Headers & { getSetCookie?: () => string[] }
   if (enhancedHeaders.getSetCookie) return enhancedHeaders.getSetCookie()
@@ -47,7 +49,11 @@ export class DnsmgrClient {
   ) {}
 
   async get(path: string, context: RequestContext): Promise<UpstreamResult> {
-    return this.request(path, { method: 'GET' }, context)
+    return this.request(path, { method: 'GET' }, context, 'ajax')
+  }
+
+  async getHtml(path: string, context: RequestContext): Promise<UpstreamResult> {
+    return this.request(path, { method: 'GET' }, context, 'document')
   }
 
   async postForm(
@@ -65,6 +71,7 @@ export class DnsmgrClient {
         },
       },
       context,
+      'ajax',
     )
   }
 
@@ -72,6 +79,7 @@ export class DnsmgrClient {
     path: string,
     init: RequestInit,
     context: RequestContext,
+    mode: RequestMode,
   ): Promise<UpstreamResult> {
     if (!path.startsWith('/') || path.startsWith('//')) {
       throw new ApiError(500, 'INVALID_UPSTREAM_PATH', '拒绝访问非站内上游路径')
@@ -83,8 +91,13 @@ export class DnsmgrClient {
     }
 
     const headers = new Headers(init.headers)
-    headers.set('accept', 'application/json, text/html;q=0.9')
-    headers.set('x-requested-with', 'XMLHttpRequest')
+    if (mode === 'document') {
+      headers.set('accept', 'text/html, application/xhtml+xml')
+      headers.delete('x-requested-with')
+    } else {
+      headers.set('accept', 'application/json, text/html;q=0.9')
+      headers.set('x-requested-with', 'XMLHttpRequest')
+    }
     if (context.cookie) headers.set('cookie', context.cookie)
     if (context.forwardedFor) headers.set('x-forwarded-for', context.forwardedFor)
     if (this.config.upstream.host) headers.set('host', this.config.upstream.host)
@@ -97,6 +110,7 @@ export class DnsmgrClient {
       path: url.pathname,
       upstreamHost: url.host,
       hasSessionCookie: Boolean(context.cookie),
+      requestMode: mode,
     }
     context.logger?.info(logContext, 'dnsmgr upstream request')
 

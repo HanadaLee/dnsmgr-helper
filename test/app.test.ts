@@ -371,6 +371,8 @@ describe('session compatibility', () => {
       const headers = new Headers(init.headers)
       expect(headers.get('cookie')).toBe('user_token=legacy-session')
       expect(headers.get('host')).toBe('dns.internal.test')
+      expect(headers.get('accept')).toBe('text/html, application/xhtml+xml')
+      expect(headers.get('x-requested-with')).toBeNull()
 
       return new Response(`
         <html><body>
