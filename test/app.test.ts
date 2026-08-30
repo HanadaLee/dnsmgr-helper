@@ -414,6 +414,34 @@ describe('session compatibility', () => {
     })
     expect(fetcher).not.toHaveBeenCalled()
   })
+
+  it('accepts a valid helper session when a stale same-name cookie follows it', async () => {
+    const appConfig = config()
+    const validHelperToken = await createCasSession(profile, appConfig)
+    const cookie = [
+      `${appConfig.cas.sessionCookie}=${encodeURIComponent(validHelperToken)}`,
+      `${appConfig.cas.sessionCookie}=stale-session`,
+      `${appConfig.legacySso.sessionCookie}=legacy-session`,
+    ].join('; ')
+    const fetcher = fakeFetch((_url, init) => {
+      expect(new Headers(init.headers).get('cookie')).toBe('user_token=legacy-session')
+      return new Response('<span class="hidden-xs">hanada</span>', {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      })
+    })
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/session',
+      headers: { cookie },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      data: { user: { name: 'hanada' }, sso: { profileVerified: true } },
+    })
+  })
 })
 
 describe('v1051 list translation', () => {

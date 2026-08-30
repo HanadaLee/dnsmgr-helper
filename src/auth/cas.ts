@@ -4,7 +4,7 @@ import { jwtVerify, SignJWT } from 'jose'
 
 import type { AppConfig } from '../config.js'
 import type { CasProfile } from '../contracts.js'
-import { parseCookieHeader } from './cookies.js'
+import { cookieValues } from './cookies.js'
 
 const SESSION_ISSUER = 'dnsmgr-helper'
 const SESSION_AUDIENCE = 'dnsmgr-web'
@@ -18,6 +18,12 @@ function sessionKey(config: AppConfig): Uint8Array | undefined {
   const secret = config.cas.sessionSecret
   return secret ? new TextEncoder().encode(secret) : undefined
 }
+
+export type CasSessionVerification =
+  | { status: 'disabled'; candidateCount: 0 }
+  | { status: 'missing'; candidateCount: 0 }
+  | { status: 'invalid'; candidateCount: number }
+  | { status: 'valid'; candidateCount: number; profile: CasProfile }
 
 export async function createCasSession(profile: CasProfile, config: AppConfig): Promise<string> {
   const key = sessionKey(config)
@@ -40,36 +46,50 @@ export async function createCasSession(profile: CasProfile, config: AppConfig): 
     .sign(key)
 }
 
+export async function verifyCasSession(
+  cookieHeader: string | undefined,
+  config: AppConfig,
+): Promise<CasSessionVerification> {
+  const key = sessionKey(config)
+  if (!config.cas.enabled || !key) return { status: 'disabled', candidateCount: 0 }
+
+  const candidates = cookieValues(cookieHeader, config.cas.sessionCookie)
+  if (candidates.length === 0) return { status: 'missing', candidateCount: 0 }
+
+  for (const token of candidates) {
+    try {
+      const result = await jwtVerify(token, key, {
+        algorithms: ['HS256'],
+        issuer: SESSION_ISSUER,
+        audience: SESSION_AUDIENCE,
+      })
+      const name = optionalClaim(result.payload, 'name')
+      if (!name || result.payload.sub !== name) continue
+
+      const email = optionalClaim(result.payload, 'email')
+      const displayName = optionalClaim(result.payload, 'displayName')
+      const avatar = optionalClaim(result.payload, 'avatar')
+      const profile = {
+        name,
+        ...(email ? { email } : {}),
+        ...(displayName ? { displayName } : {}),
+        ...(avatar ? { avatar } : {}),
+      }
+
+      return { status: 'valid', candidateCount: candidates.length, profile }
+    } catch {
+      // A browser can send same-name host-only and domain cookies together.
+      // Try every candidate before rejecting the request.
+    }
+  }
+
+  return { status: 'invalid', candidateCount: candidates.length }
+}
+
 export async function verifyCasProfile(
   cookieHeader: string | undefined,
   config: AppConfig,
 ): Promise<CasProfile | undefined> {
-  const key = sessionKey(config)
-  if (!config.cas.enabled || !key) return undefined
-
-  const token = parseCookieHeader(cookieHeader).get(config.cas.sessionCookie)
-  if (!token) return undefined
-
-  try {
-    const result = await jwtVerify(token, key, {
-      algorithms: ['HS256'],
-      issuer: SESSION_ISSUER,
-      audience: SESSION_AUDIENCE,
-    })
-    const name = optionalClaim(result.payload, 'name')
-    if (!name || result.payload.sub !== name) return undefined
-
-    const email = optionalClaim(result.payload, 'email')
-    const displayName = optionalClaim(result.payload, 'displayName')
-    const avatar = optionalClaim(result.payload, 'avatar')
-
-    return {
-      name,
-      ...(email ? { email } : {}),
-      ...(displayName ? { displayName } : {}),
-      ...(avatar ? { avatar } : {}),
-    }
-  } catch {
-    return undefined
-  }
+  const verification = await verifyCasSession(cookieHeader, config)
+  return verification.status === 'valid' ? verification.profile : undefined
 }

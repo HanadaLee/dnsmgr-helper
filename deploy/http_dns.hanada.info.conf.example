@@ -50,6 +50,7 @@ server {
     # No auth_cas or auth_sso_adapter directive is used by this server.
     location ^~ /api/web/v1/ {
         set $no_cache 1;
+        proxy_request_header_control set Cookie $http_cookie;
         include snippet/http_json_error_pages.conf;
         lua_config proxy_select_local http://127.0.0.1:19102;
         include snippet/http_proxy_select_pass.conf;
@@ -58,6 +59,7 @@ server {
     location ^~ /cas/ {
         lua_config client_cache bust;
         set $no_cache 1;
+        proxy_request_header_control set Cookie $http_cookie;
         include snippet/http_json_error_pages.conf;
         lua_config proxy_select_local http://127.0.0.1:19102;
         include snippet/http_proxy_select_pass.conf;
@@ -66,6 +68,7 @@ server {
     location = /login {
         lua_config client_cache bust;
         set $no_cache 1;
+        proxy_request_header_control set Cookie $http_cookie;
         lua_config proxy_select_local http://127.0.0.1:19102;
         include snippet/http_proxy_select_pass.conf;
     }
@@ -73,6 +76,7 @@ server {
     location = /logout {
         lua_config client_cache bust;
         set $no_cache 1;
+        proxy_request_header_control set Cookie $http_cookie;
         lua_config proxy_select_local http://127.0.0.1:19102;
         include snippet/http_proxy_select_pass.conf;
     }

@@ -1,5 +1,13 @@
-export function parseCookieHeader(cookieHeader: string | undefined): Map<string, string> {
-  const cookies = new Map<string, string>()
+function decodeCookieValue(rawValue: string): string {
+  try {
+    return decodeURIComponent(rawValue)
+  } catch {
+    return rawValue
+  }
+}
+
+function cookiePairs(cookieHeader: string | undefined): Array<[string, string]> {
+  const cookies: Array<[string, string]> = []
   if (!cookieHeader) return cookies
 
   for (const item of cookieHeader.split(';')) {
@@ -8,15 +16,20 @@ export function parseCookieHeader(cookieHeader: string | undefined): Map<string,
     const key = item.slice(0, separator).trim()
     const rawValue = item.slice(separator + 1).trim()
     if (!key) continue
-
-    try {
-      cookies.set(key, decodeURIComponent(rawValue))
-    } catch {
-      cookies.set(key, rawValue)
-    }
+    cookies.push([key, decodeCookieValue(rawValue)])
   }
 
   return cookies
+}
+
+export function parseCookieHeader(cookieHeader: string | undefined): Map<string, string> {
+  return new Map(cookiePairs(cookieHeader))
+}
+
+export function cookieValues(cookieHeader: string | undefined, name: string): string[] {
+  return cookiePairs(cookieHeader)
+    .filter(([cookieName]) => cookieName === name)
+    .map(([, value]) => value)
 }
 
 export type CookieOptions = {

@@ -5,8 +5,8 @@ import { z } from 'zod'
 import { getDomain, listDomains, listRecords } from './adapters/v1051/domains.js'
 import { sessionFromUpstream } from './adapters/v1051/session.js'
 import { casLoginUrl, casLogoutUrl, CasClient, safeReturnTo } from './auth/cas-client.js'
-import { createCasSession, verifyCasProfile } from './auth/cas.js'
-import { serializeHttpOnlyCookie } from './auth/cookies.js'
+import { createCasSession, verifyCasSession } from './auth/cas.js'
+import { cookieValues, serializeHttpOnlyCookie } from './auth/cookies.js'
 import { LegacySsoService } from './auth/legacy-sso.js'
 import { loadConfig, type AppConfig } from './config.js'
 import type { CasProfile } from './contracts.js'
@@ -82,9 +82,18 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       )
     }
 
-    const profile = await verifyCasProfile(request.headers.cookie, config)
+    const verification = await verifyCasSession(request.headers.cookie, config)
+    const profile = verification.status === 'valid' ? verification.profile : undefined
     casProfiles.set(request, profile)
-    if (config.cas.enabled && !profile) throw authenticationError(config)
+    if (config.cas.enabled && !profile) {
+      request.log.warn({
+        casSessionStatus: verification.status,
+        helperSessionCookieCount: verification.candidateCount,
+        legacySessionCookiePresent:
+          cookieValues(request.headers.cookie, config.legacySso.sessionCookie).length > 0,
+      }, 'CAS session cookie rejected')
+      throw authenticationError(config)
+    }
   })
 
   app.get('/healthz', async () => ({
