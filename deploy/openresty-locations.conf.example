@@ -51,18 +51,6 @@ location = /logout {
     proxy_set_header X-Request-ID $request_id;
 }
 
-# Private bridge used only by dnsmgr-helper. The helper static config points
-# upstream.url at this prefix and sets upstream.host to the public DNS host.
-location ^~ /__dnsmgr_legacy/ {
-    allow 127.0.0.1;
-    allow ::1;
-    deny all;
-
-    rewrite ^/__dnsmgr_legacy/(.*)$ /$1 break;
-    set $no_cache 1;
-    include snippet/http_proxy_select_pass.conf;
-}
-
 # Staged frontend. Build with VITE_BASE_PATH=/next/ and copy dist/* to
 # /srv/dnsmgr-frontend/next/.
 location ^~ /next/assets/ {

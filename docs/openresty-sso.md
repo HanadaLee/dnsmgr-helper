@@ -2,7 +2,7 @@
 
 ## 新的职责边界
 
-OpenResty 不再加载或执行站点级 CAS/SSO 逻辑，只负责 TLS、反向代理、静态资源和原 dnsmgr 私有入口。以下职责全部由 `dnsmgr-helper` 完成：
+OpenResty 不再加载或执行站点级 CAS/SSO 逻辑，只负责 TLS、公开路径反向代理和静态资源。以下职责全部由 `dnsmgr-helper` 完成：
 
 - 生成 CAS 登录和退出地址；
 - 使用回调的 Ticket 调用 `serviceValidate`；
@@ -42,11 +42,10 @@ OpenResty：只转发以上路径，不解析 Ticket、不签 JWT、不托管用
 把 [`deploy/openresty-locations.conf.example`](../deploy/openresty-locations.conf.example) 合并到站点：
 
 - `/api/web/v1/`、`/cas/`、`/login`、`/logout` 转发到 helper；
-- `/__dnsmgr_legacy/` 只允许回环访问，并转发到原 dnsmgr；
 - 原 `/api` 可暂时保留给旧页面；
 - `/setpwd`、`/system/loginset` 可以继续做普通外部跳转，它们不再参与认证。
 
-helper 应继续只监听回环地址。私有 legacy 前缀不能暴露给外网。
+helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原 dnsmgr；OpenResty 不再为 helper 提供 legacy 中转路径。
 
 ## 静态配置对应关系
 
@@ -54,6 +53,10 @@ helper 应继续只监听回环地址。私有 legacy 前缀不能暴露给外�
 
 ```json
 {
+  "upstream": {
+    "url": "http://127.0.0.1:19101/",
+    "host": "dns.example.com"
+  },
   "cas": {
     "enabled": true,
     "baseUrl": "https://cas.example.com/cas/organization/application/",

@@ -5,8 +5,8 @@ services:
     restart: always
     init: true
 
-    # helper、OpenResty 私有 legacy 入口和数据库都在同一主机时使用 host 网络。
-    # 此时配置中的 127.0.0.1 指向宿主机，并且 helper 仍只监听回环地址。
+    # helper、原 dnsmgr 和数据库都在同一主机时使用 host 网络。
+    # 此时配置中的 127.0.0.1 指向宿主机，helper 可直连原 dnsmgr 且仍只监听回环地址。
     network_mode: host
 
     environment:

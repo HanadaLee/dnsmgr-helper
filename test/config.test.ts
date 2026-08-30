@@ -48,7 +48,7 @@ default_lang = zh-cn
         publicUrl: 'https://dns.example.com/',
       },
       upstream: {
-        url: 'http://127.0.0.1:8081/__dnsmgr_legacy/',
+        url: 'http://127.0.0.1:19101/',
       },
       cas: { enabled: false },
       legacySso: {},
