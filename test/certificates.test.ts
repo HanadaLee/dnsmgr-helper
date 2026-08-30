@@ -1,0 +1,478 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { buildApp } from '../src/app.js'
+import { parseConfig } from '../src/config.js'
+import type { FetchLike } from '../src/upstream/client.js'
+
+const apps: Awaited<ReturnType<typeof buildApp>>[] = []
+
+afterEach(async () => {
+  await Promise.all(apps.splice(0).map((app) => app.close()))
+  vi.restoreAllMocks()
+})
+
+function testConfig() {
+  return parseConfig({
+    server: { environment: 'test', publicUrl: 'https://dns.test/' },
+    upstream: { url: 'http://legacy.test/internal/' },
+    cas: { enabled: false },
+    legacySso: {},
+    database: {},
+  })
+}
+
+function fakeFetch(
+  handler: (url: URL, init: RequestInit) => Response | Promise<Response>,
+): FetchLike {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? new URL(input.url) : new URL(input)
+    return handler(url, init ?? {})
+  }) as FetchLike
+}
+
+async function appWith(handler: (url: URL, init: RequestInit) => Response | Promise<Response>) {
+  const app = await buildApp({ config: testConfig(), fetcher: fakeFetch(handler), logger: false })
+  apps.push(app)
+  return app
+}
+
+function json(value: unknown) {
+  return Response.json(value)
+}
+
+function html(value: string) {
+  return new Response(value, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+}
+
+function form(init: RequestInit) {
+  return new URLSearchParams(String(init.body))
+}
+
+const headers = { cookie: 'user_token=legacy-certificate-session' }
+
+describe('typed certificate API', () => {
+  it('normalizes account definitions without exposing list credentials and translates all account mutations', async () => {
+    const typeState = `<script>
+      var info = null;
+      var typeList = {
+        "acme": {
+          "name":"ACME &amp; DNS", "class":"free", "icon":"acme.svg", "wildcard":true,
+          "max_domains":100, "cname":1,
+          "inputs": {
+            "environment":{"name":"环境","type":"select","required":true,"options":{"prod":"生产","test":"测试"},"value":"prod"},
+            "api_token":{"name":"API 密钥","type":"input","required":true,"show":"environment=='prod' && mode!='dns'"}
+          }
+        }
+      };
+      var classList = {"free":"免费证书"};
+    </script>`
+    const app = await appWith((url, init) => {
+      if (url.pathname === '/internal/cert/account/add' && init.method === 'GET') return html(typeState)
+      if (url.pathname === '/internal/cert/account/edit' && init.method === 'GET') {
+        expect(url.searchParams.get('deploy')).toBe('0')
+        expect(url.searchParams.get('id')).toBe('7')
+        return html(typeState.replace(
+          'var info = null;',
+          'var info = {"id":7,"type":"acme","name":"主账户","remark":"production","addtime":"2026-08-01 10:00:00","config":"{\\"api_token\\":\\"secret\\",\\"environment\\":\\"prod\\"}"};',
+        ))
+      }
+      if (url.pathname === '/internal/cert/account/data') {
+        expect(url.searchParams.get('deploy')).toBe('0')
+        expect(Object.fromEntries(form(init))).toEqual({
+          offset: '0', limit: '10', sortName: 'name', sortOrder: 'asc', kw: '主',
+        })
+        return json({ total: 1, rows: [{
+          id: 7, type: 'acme', typename: 'ACME &amp; DNS', icon: 'acme.svg', name: '主账户',
+          remark: 'production', addtime: '2026-08-01 10:00:00', config: '{"api_token":"must-not-leak"}',
+          ext: '{"credential":"must-not-leak"}',
+        }] })
+      }
+      if (url.pathname === '/internal/cert/account/add') {
+        expect(Object.fromEntries(form(init))).toEqual({
+          deploy: '0', type: 'acme', name: '主账户',
+          config: '{"api_token":"secret","environment":"prod"}', remark: 'production',
+        })
+        return json({ code: 0, msg: '添加成功' })
+      }
+      if (url.pathname === '/internal/cert/account/edit') {
+        expect(form(init).get('id')).toBe('7')
+        expect(form(init).get('deploy')).toBe('0')
+        return json({ code: 0, msg: '修改成功' })
+      }
+      if (url.pathname === '/internal/cert/account/del') {
+        expect(Object.fromEntries(form(init))).toEqual({ id: '7', deploy: '0' })
+        return json({ code: 0 })
+      }
+      throw new Error(`unexpected request: ${init.method} ${url.pathname}`)
+    })
+
+    const types = await app.inject({
+      method: 'GET', url: '/api/web/v1/certificate-account-types?kind=issuance', headers,
+    })
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/certificate-accounts?kind=issuance&pageSize=10&q=%E4%B8%BB&sort=name&order=asc',
+      headers,
+    })
+    const detail = await app.inject({
+      method: 'GET', url: '/api/web/v1/certificate-accounts/7?kind=issuance', headers,
+    })
+    const payload = {
+      kind: 'issuance', type: 'acme', name: '主账户',
+      config: { api_token: 'secret', environment: 'prod' }, remark: 'production',
+    }
+    const create = await app.inject({ method: 'POST', url: '/api/web/v1/certificate-accounts', headers, payload })
+    const update = await app.inject({ method: 'PUT', url: '/api/web/v1/certificate-accounts/7', headers, payload })
+    const remove = await app.inject({
+      method: 'DELETE', url: '/api/web/v1/certificate-accounts/7?kind=issuance', headers,
+    })
+
+    expect(types.json()).toMatchObject({
+      code: 'OK',
+      data: [{
+        type: 'acme', kind: 'issuance', label: 'ACME & DNS',
+        category: { id: 'free', label: '免费证书' },
+        capabilities: { wildcard: true, maxDomains: 100, cnameDelegation: true },
+        fields: [
+          { key: 'environment', control: 'select', defaultValue: 'prod', sensitive: false },
+          {
+            key: 'api_token', sensitive: true,
+            visibleWhen: { any: [{ all: [
+              { field: 'environment', operator: 'equals', value: 'prod' },
+              { field: 'mode', operator: 'not-equals', value: 'dns' },
+            ] }] },
+          },
+        ],
+      }],
+    })
+    expect(list.json()).toEqual({
+      code: 'OK',
+      data: [{
+        id: 7, kind: 'issuance', type: 'acme', typeLabel: 'ACME & DNS', icon: 'acme.svg',
+        name: '主账户', remark: 'production', addedAt: '2026-08-01 10:00:00',
+      }],
+      meta: { page: 1, pageSize: 10, total: 1 },
+    })
+    expect(detail.json()).toMatchObject({
+      code: 'OK', data: { id: 7, config: { api_token: 'secret', environment: 'prod' } },
+    })
+    expect(create.json()).toEqual({ code: 'OK', message: '添加成功' })
+    expect(update.json()).toEqual({ code: 'OK', message: '修改成功' })
+    expect(remove.json()).toEqual({ code: 'OK' })
+  })
+
+  it('covers certificate order forms, secrets, lifecycle actions, batches and safe process logs', async () => {
+    const actionPaths: string[] = []
+    const orderRow = {
+      id: 9, aid: 0, keytype: 'RSA', keysize: 2048, issuer: 'Example CA', isauto: 1,
+      status: -3, islock: 1, processid: '0123456789abcdef0123456789abcdef',
+      domains: ['example.com', '*.example.com'], issuetime: '2026-08-01 00:00:00',
+      expiretime: '2026-11-01 00:00:00', end_day: 62, error: 'DNS &lt;timeout&gt;',
+    }
+    const app = await appWith((url, init) => {
+      if (url.pathname === '/internal/cert/order/add' && init.method === 'GET') {
+        return html(`<select name="aid"><option value="">请选择</option><option value="3" data-type="acme">3_ACME</option></select>`)
+      }
+      if (url.pathname === '/internal/cert/order/edit' && init.method === 'GET') {
+        return html(`<script>var info = {"id":9,"aid":0,"fullchain":"-----BEGIN CERTIFICATE-----\\nCRT","privatekey":"-----BEGIN PRIVATE KEY-----\\nKEY"};</script>`)
+      }
+      if (url.pathname === '/internal/cert/order/data') {
+        const values = form(init)
+        if (!values.has('id')) {
+          expect(Object.fromEntries(values)).toEqual({
+            offset: '0', limit: '10', sortName: 'status', sortOrder: 'asc', domain: 'example.com', status: '5',
+          })
+        }
+        return json({ total: 1, rows: [orderRow] })
+      }
+      if (url.pathname === '/internal/cert/order') {
+        expect(form(init).get('id')).toBe('9')
+        return json({ code: 0, data: {
+          id: 9, crt: 'CERTIFICATE', key: 'PRIVATE KEY', pfx: 'UEZY',
+          issuetime: '2026-08-01 00:00:00', expiretime: '2026-11-01 00:00:00', domains: ['example.com'],
+        } })
+      }
+      if (url.pathname === '/internal/cert/order/show_log') {
+        expect(form(init).get('processid')).toBe('0123456789abcdef0123456789abcdef')
+        return json({ code: 0, data: 'processing\ndone', time: 1788118000 })
+      }
+      if (url.pathname.startsWith('/internal/cert/order/')) {
+        actionPaths.push(url.pathname)
+        const values = form(init)
+        if (url.pathname.endsWith('/add')) {
+          expect(values.get('aid')).toBe('3')
+          expect(values.getAll('domains[]')).toEqual(['example.com', '*.example.com'])
+        }
+        if (url.pathname.endsWith('/edit')) {
+          expect(Object.fromEntries(values)).toEqual({
+            id: '9', aid: '-1', fullchain: 'CERTIFICATE', privatekey: 'PRIVATE KEY',
+          })
+        }
+        if (url.pathname.endsWith('/setauto')) expect(values.get('isauto')).toBe('0')
+        if (url.pathname.endsWith('/operation')) {
+          expect(values.getAll('ids[]')).toEqual(['9', '10'])
+          expect(values.get('act')).toBe('open')
+        }
+        if (url.pathname.endsWith('/process')) expect(values.get('reset')).toBe('1')
+        return json({ code: 0, msg: '操作成功' })
+      }
+      throw new Error(`unexpected request: ${init.method} ${url.pathname}`)
+    })
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/certificate-orders?pageSize=10&domain=example.com&status=failed&sort=status&order=asc',
+      headers,
+    })
+    const formResponse = await app.inject({ method: 'GET', url: '/api/web/v1/certificate-orders/form', headers })
+    const detail = await app.inject({ method: 'GET', url: '/api/web/v1/certificate-orders/9', headers })
+    const artifacts = await app.inject({
+      method: 'GET', url: '/api/web/v1/certificate-orders/9/artifacts', headers,
+    })
+    const log = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/certificate-orders/9/log?processId=0123456789abcdef0123456789abcdef',
+      headers,
+    })
+    const invalidLog = await app.inject({
+      method: 'GET', url: '/api/web/v1/certificate-orders/9/log?processId=..%2F..%2Fsecret', headers,
+    })
+    const managed = {
+      mode: 'managed', accountId: 3, keyType: 'RSA', keySize: 2048,
+      domains: ['example.com', '*.example.com'],
+    }
+    const manual = { mode: 'manual', certificate: 'CERTIFICATE', privateKey: 'PRIVATE KEY' }
+    const responses = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/web/v1/certificate-orders', headers, payload: managed }),
+      app.inject({ method: 'PUT', url: '/api/web/v1/certificate-orders/9', headers, payload: manual }),
+      app.inject({ method: 'DELETE', url: '/api/web/v1/certificate-orders/9', headers }),
+      app.inject({ method: 'PATCH', url: '/api/web/v1/certificate-orders/9/auto-renew', headers, payload: { enabled: false } }),
+      app.inject({ method: 'POST', url: '/api/web/v1/certificate-orders/9/reset', headers }),
+      app.inject({ method: 'POST', url: '/api/web/v1/certificate-orders/9/revoke', headers }),
+      app.inject({ method: 'POST', url: '/api/web/v1/certificate-orders/9/process', headers, payload: { reset: true } }),
+      app.inject({
+        method: 'POST', url: '/api/web/v1/certificate-orders/batch', headers,
+        payload: { ids: [9, 10], action: 'enable' },
+      }),
+    ])
+
+    expect(list.json()).toMatchObject({
+      code: 'OK',
+      data: [{
+        id: 9, mode: 'manual', domains: ['example.com', '*.example.com'], status: 'failed',
+        failureStage: 'add-dns', processing: true, error: 'DNS <timeout>',
+      }],
+      meta: { page: 1, pageSize: 10, total: 1 },
+    })
+    expect(formResponse.json()).toEqual({
+      code: 'OK',
+      data: {
+        accounts: [{ id: 3, type: 'acme', label: '3_ACME' }],
+        keyOptions: { RSA: [2048, 3072], ECC: [256, 384] },
+        defaults: { mode: 'managed', keyType: 'RSA', keySize: 2048 },
+      },
+    })
+    expect(detail.json()).toMatchObject({
+      code: 'OK', data: { id: 9, certificate: '-----BEGIN CERTIFICATE-----\nCRT', privateKey: '-----BEGIN PRIVATE KEY-----\nKEY' },
+    })
+    expect(artifacts.json()).toEqual({
+      code: 'OK',
+      data: {
+        id: 9, domains: ['example.com'], certificate: 'CERTIFICATE', privateKey: 'PRIVATE KEY',
+        pfxBase64: 'UEZY', pfxPassword: '123456',
+        issuedAt: '2026-08-01 00:00:00', expiresAt: '2026-11-01 00:00:00',
+      },
+    })
+    expect(log.json()).toEqual({ code: 'OK', data: { content: 'processing\ndone', modifiedAt: 1788118000 } })
+    expect(invalidLog.statusCode).toBe(422)
+    responses.forEach((response) => expect(response.json()).toEqual({ code: 'OK', message: '操作成功' }))
+    expect(actionPaths).toEqual(expect.arrayContaining([
+      '/internal/cert/order/add', '/internal/cert/order/edit', '/internal/cert/order/del',
+      '/internal/cert/order/setauto', '/internal/cert/order/reset', '/internal/cert/order/revoke',
+      '/internal/cert/order/process', '/internal/cert/order/operation',
+    ]))
+  })
+
+  it('covers deployments, CNAME delegation and the fixed certificate settings whitelist', async () => {
+    const deploymentActions: string[] = []
+    const cnameActions: string[] = []
+    const app = await appWith((url, init) => {
+      if (url.pathname === '/internal/cert/deploy/add' && init.method === 'GET') {
+        return html(`<select name="aid"><option value="">请选择</option><option value="4" data-type="nginx">4_Nginx</option></select>
+          <select name="oid"><option value="9">9_example.com（ACME）</option></select>
+          <script>var info=null; var typeList={"nginx":{"name":"Nginx","taskinputs":{"path":{"name":"证书路径","type":"input","required":true}},"tasknote":"重新加载服务"}};</script>`)
+      }
+      if (url.pathname === '/internal/cert/deploy/edit' && init.method === 'GET') {
+        return html(`<script>var info={"id":11,"aid":4,"oid":9,"type":"nginx","config":"{\\"path\\":\\"/etc/nginx/cert.pem\\"}","remark":"edge"};</script>`)
+      }
+      if (url.pathname === '/internal/cert/deploy/data') {
+        expect(Object.fromEntries(form(init))).toEqual({
+          offset: '0', limit: '10', sortName: 'lasttime', sortOrder: 'asc',
+          domain: 'example.com', aid: '4', status: '-1', remark: 'edge',
+        })
+        return json({ total: 1, rows: [{
+          id: 11, aid: 4, oid: 9, type: 'nginx', typename: 'Nginx', aname: '边缘节点', aremark: 'hk',
+          certtype: 'acme', certtypename: 'ACME', domains: ['example.com'], active: 1,
+          status: -1, islock: 0, processid: 'fedcba9876543210fedcba9876543210',
+          lasttime: '2026-08-31 12:00:00', addtime: '2026-08-01 00:00:00', error: 'reload failed', remark: 'edge',
+        }] })
+      }
+      if (url.pathname === '/internal/cert/deploy/show_log') {
+        expect(form(init).get('processid')).toBe('fedcba9876543210fedcba9876543210')
+        return json({ code: 0, data: 'deploy complete', time: 1788119000 })
+      }
+      if (url.pathname.startsWith('/internal/cert/deploy/')) {
+        deploymentActions.push(url.pathname)
+        const values = form(init)
+        if (url.pathname.endsWith('/add')) {
+          expect(Object.fromEntries(values)).toEqual({
+            aid: '4', oid: '9', config: '{"path":"/etc/nginx/cert.pem"}', remark: 'edge',
+          })
+        }
+        if (url.pathname.endsWith('/operation')) {
+          expect(values.getAll('ids[]')).toEqual(['11', '12'])
+          expect(values.get('act')).toBe('cert')
+          expect(values.get('certid')).toBe('10')
+        }
+        if (url.pathname.endsWith('/setactive')) expect(values.get('active')).toBe('0')
+        if (url.pathname.endsWith('/process')) expect(values.get('reset')).toBe('1')
+        return json({ code: 0, msg: '部署操作成功' })
+      }
+      if (url.pathname === '/internal/cert/cname' && init.method === 'GET') {
+        return html('<select name="did"><option value="42">target.example</option></select>')
+      }
+      if (url.pathname === '/internal/cert/cname/data') {
+        expect(Object.fromEntries(form(init))).toEqual({
+          offset: '0', limit: '10', sortName: 'domain', sortOrder: 'asc', kw: 'external',
+        })
+        return json({ total: 1, rows: [{
+          id: 13, domain: 'external.example', host: '_acme-challenge', did: 42,
+          cnamedomain: 'target.example', rr: '_acme-proxy', record: '_acme-proxy.target.example',
+          status: 1, addtime: '2026-08-31 00:00:00',
+        }] })
+      }
+      if (url.pathname.startsWith('/internal/cert/cname/')) {
+        cnameActions.push(url.pathname)
+        if (url.pathname.endsWith('/check')) return json({ code: 0, status: 1 })
+        return json({ code: 0, msg: 'CNAME 操作成功' })
+      }
+      if (url.pathname === '/internal/cert/certset' && init.method === 'GET') {
+        return html(`<input name="cert_renewdays" value="14">
+          <select name="deploy_hour_start" default="1"></select><select name="deploy_hour_end" default="22"></select>
+          <select name="cert_notice_mail" default="1"></select><select name="cert_notice_wxtpl" default="0"></select>
+          <select name="cert_notice_tgbot" default="2"></select><select name="cert_notice_webhook" default="1"></select>
+          <select name="cert_notice_custom_webhook" default="0"></select>`)
+      }
+      if (url.pathname === '/internal/system/set') {
+        expect(Object.fromEntries(form(init))).toEqual({
+          cert_renewdays: '30', cert_notice_mail: '2', cert_notice_custom_webhook: '1',
+        })
+        return json({ code: 0, msg: '设置保存成功' })
+      }
+      throw new Error(`unexpected request: ${init.method} ${url.pathname}`)
+    })
+
+    const deploymentList = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/certificate-deployments?pageSize=10&domain=example.com&accountId=4&status=failed&remark=edge&sort=lastRunAt&order=asc',
+      headers,
+    })
+    const deploymentForm = await app.inject({
+      method: 'GET', url: '/api/web/v1/certificate-deployments/form', headers,
+    })
+    const deploymentDetail = await app.inject({
+      method: 'GET', url: '/api/web/v1/certificate-deployments/11', headers,
+    })
+    const deploymentLog = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/certificate-deployments/11/log?processId=fedcba9876543210fedcba9876543210',
+      headers,
+    })
+    const deploymentPayload = {
+      accountId: 4, orderId: 9, config: { path: '/etc/nginx/cert.pem' }, remark: 'edge',
+    }
+    const deploymentResponses = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/web/v1/certificate-deployments', headers, payload: deploymentPayload }),
+      app.inject({ method: 'PUT', url: '/api/web/v1/certificate-deployments/11', headers, payload: deploymentPayload }),
+      app.inject({ method: 'DELETE', url: '/api/web/v1/certificate-deployments/11', headers }),
+      app.inject({ method: 'PATCH', url: '/api/web/v1/certificate-deployments/11/status', headers, payload: { enabled: false } }),
+      app.inject({ method: 'POST', url: '/api/web/v1/certificate-deployments/11/reset', headers }),
+      app.inject({ method: 'POST', url: '/api/web/v1/certificate-deployments/11/process', headers, payload: { reset: true } }),
+      app.inject({
+        method: 'POST', url: '/api/web/v1/certificate-deployments/batch', headers,
+        payload: { ids: [11, 12], action: 'assign-certificate', orderId: 10 },
+      }),
+    ])
+
+    expect(deploymentList.json()).toMatchObject({
+      code: 'OK',
+      data: [{
+        id: 11, account: { id: 4, type: 'nginx', label: 'Nginx', name: '边缘节点' },
+        order: { id: 9, sourceType: 'acme', sourceLabel: 'ACME', domains: ['example.com'] },
+        active: true, status: 'failed', error: 'reload failed', remark: 'edge',
+      }],
+    })
+    expect(deploymentForm.json()).toMatchObject({
+      code: 'OK',
+      data: {
+        accounts: [{ id: 4, type: 'nginx', label: '4_Nginx' }],
+        orders: [{ id: 9, label: '9_example.com（ACME）' }],
+        accountTypes: [{ type: 'nginx', taskFields: [{ key: 'path', required: true }], taskNote: '重新加载服务' }],
+      },
+    })
+    expect(deploymentDetail.json()).toEqual({
+      code: 'OK', data: {
+        id: 11, accountId: 4, accountType: 'nginx', orderId: 9,
+        config: { path: '/etc/nginx/cert.pem' }, remark: 'edge',
+      },
+    })
+    expect(deploymentLog.json()).toEqual({ code: 'OK', data: { content: 'deploy complete', modifiedAt: 1788119000 } })
+    deploymentResponses.forEach((response) => {
+      expect(response.json()).toEqual({ code: 'OK', message: '部署操作成功' })
+    })
+
+    const cnameForm = await app.inject({ method: 'GET', url: '/api/web/v1/certificate-cnames/form', headers })
+    const cnameList = await app.inject({
+      method: 'GET', url: '/api/web/v1/certificate-cnames?pageSize=10&q=external&sort=domain&order=asc', headers,
+    })
+    const cnameResponses = await Promise.all([
+      app.inject({
+        method: 'POST', url: '/api/web/v1/certificate-cnames', headers,
+        payload: { domain: 'external.example', targetRecordName: '_acme-proxy', targetDomainId: 42 },
+      }),
+      app.inject({
+        method: 'PUT', url: '/api/web/v1/certificate-cnames/13', headers,
+        payload: { targetRecordName: '_acme-proxy', targetDomainId: 42 },
+      }),
+      app.inject({ method: 'DELETE', url: '/api/web/v1/certificate-cnames/13', headers }),
+    ])
+    const cnameCheck = await app.inject({ method: 'POST', url: '/api/web/v1/certificate-cnames/13/check', headers })
+    expect(cnameForm.json()).toEqual({ code: 'OK', data: { domains: [{ id: 42, name: 'target.example' }] } })
+    expect(cnameList.json()).toMatchObject({
+      code: 'OK', data: [{ id: 13, status: 'verified', target: '_acme-proxy.target.example' }],
+    })
+    cnameResponses.forEach((response) => expect(response.json()).toEqual({ code: 'OK', message: 'CNAME 操作成功' }))
+    expect(cnameCheck.json()).toEqual({ code: 'OK', data: { status: 'verified' } })
+
+    const settings = await app.inject({ method: 'GET', url: '/api/web/v1/certificate-settings', headers })
+    const settingsUpdate = await app.inject({
+      method: 'PUT', url: '/api/web/v1/certificate-settings', headers,
+      payload: {
+        renewBeforeDays: 30,
+        notifications: { email: 'failures-only', customWebhook: 'all' },
+      },
+    })
+    expect(settings.json()).toEqual({
+      code: 'OK', data: {
+        renewBeforeDays: 14,
+        deploymentWindow: { startHour: 1, endHour: 22 },
+        notifications: {
+          email: 'all', wechat: 'off', telegram: 'failures-only', robotWebhook: 'all', customWebhook: 'off',
+        },
+      },
+    })
+    expect(settingsUpdate.json()).toEqual({ code: 'OK', message: '设置保存成功' })
+    expect(deploymentActions).toHaveLength(7)
+    expect(cnameActions).toHaveLength(4)
+  })
+})

@@ -107,6 +107,7 @@ export const LegacyOperations = {
   'certificateAccounts.update': { group: 'certificates', method: 'POST', path: '/cert/account/edit' },
   'certificateAccounts.delete': { group: 'certificates', method: 'POST', path: '/cert/account/del' },
   'certificateOrders.list': { group: 'certificates', method: 'POST', path: '/cert/order/data' },
+  'certificateOrders.info': { group: 'certificates', method: 'POST', path: '/cert/order' },
   'certificateOrders.get': { group: 'certificates', method: 'POST', path: '/cert/order/get' },
   'certificateOrders.create': { group: 'certificates', method: 'POST', path: '/cert/order/add' },
   'certificateOrders.update': { group: 'certificates', method: 'POST', path: '/cert/order/edit' },

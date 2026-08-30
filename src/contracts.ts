@@ -118,6 +118,15 @@ export type ProviderField = {
   max?: number
   defaultValue?: unknown
   options?: ProviderFieldOption[]
+  visibleWhen?: {
+    any: Array<{
+      all: Array<{
+        field: string
+        operator: 'equals' | 'not-equals'
+        value: string
+      }>
+    }>
+  }
 }
 
 export type DnsProviderDefinition = {
@@ -301,4 +310,146 @@ export type OptimizeIpTask = {
   lastError?: string
   addedAt?: string
   remark?: string
+}
+
+export type CertificateAccountKind = 'issuance' | 'deployment'
+
+export type CertificateAccountTypeDefinition = {
+  type: string
+  kind: CertificateAccountKind
+  label: string
+  category?: { id: string; label: string }
+  icon?: string
+  description?: string
+  note?: string
+  fields: ProviderField[]
+  taskFields: ProviderField[]
+  taskNote?: string
+  capabilities?: {
+    wildcard: boolean
+    maxDomains: number
+    cnameDelegation: boolean
+  }
+}
+
+export type CertificateAccountSummary = {
+  id: number
+  kind: CertificateAccountKind
+  type: string
+  typeLabel: string
+  icon?: string
+  name: string
+  remark?: string
+  addedAt?: string
+}
+
+export type CertificateAccountDetail = CertificateAccountSummary & {
+  config: Record<string, unknown>
+}
+
+export type CertificateOrderSummary = {
+  id: number
+  mode: 'managed' | 'manual'
+  account?: {
+    id: number
+    type: string
+    label: string
+    remark?: string
+  }
+  domains: string[]
+  keyType: string
+  keySize: number
+  issuer?: string
+  autoRenew: boolean
+  status: 'pending' | 'awaiting-validation' | 'validating' | 'issued' | 'revoked' | 'failed' | 'unknown'
+  failureStage?: 'purchase' | 'create' | 'add-dns' | 'check-dns' | 'validate' | 'rejected' | 'issue' | 'unknown'
+  processing: boolean
+  retryAt?: string
+  processId?: string
+  issuedAt?: string
+  expiresAt?: string
+  remainingDays?: number
+  addedAt?: string
+  updatedAt?: string
+  error?: string
+}
+
+export type CertificateOrderDetail = CertificateOrderSummary & {
+  certificate?: string
+  privateKey?: string
+}
+
+export type CertificateArtifacts = {
+  id: number
+  domains: string[]
+  certificate: string
+  privateKey: string
+  pfxBase64: string
+  pfxPassword: string
+  issuedAt?: string
+  expiresAt?: string
+}
+
+export type CertificateDeploymentSummary = {
+  id: number
+  account: {
+    id: number
+    type: string
+    label: string
+    name?: string
+    remark?: string
+  }
+  order: {
+    id: number
+    sourceType?: string
+    sourceLabel: string
+    domains: string[]
+  }
+  active: boolean
+  status: 'pending' | 'processing' | 'succeeded' | 'failed' | 'unknown'
+  processId?: string
+  lastRunAt?: string
+  addedAt?: string
+  error?: string
+  remark?: string
+}
+
+export type CertificateDeploymentDetail = {
+  id: number
+  accountId: number
+  accountType: string
+  orderId: number
+  config: Record<string, unknown>
+  remark?: string
+}
+
+export type CertificateCnameProxy = {
+  id: number
+  domain: string
+  challengeHost: string
+  targetDomainId: number
+  targetDomain: string
+  targetRecordName: string
+  target: string
+  status: 'verified' | 'unverified'
+  addedAt?: string
+}
+
+export type CertificateNotificationMode = 'off' | 'all' | 'failures-only'
+
+export type CertificateSettings = {
+  renewBeforeDays: number
+  deploymentWindow: { startHour: number; endHour: number }
+  notifications: {
+    email: CertificateNotificationMode
+    wechat: CertificateNotificationMode
+    telegram: CertificateNotificationMode
+    robotWebhook: CertificateNotificationMode
+    customWebhook: CertificateNotificationMode
+  }
+}
+
+export type ProcessLog = {
+  content: string
+  modifiedAt: number
 }

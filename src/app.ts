@@ -12,6 +12,54 @@ import {
   updateDomainAccount,
 } from './adapters/v1051/accounts.js'
 import {
+  createCertificateAccount,
+  deleteCertificateAccount,
+  getCertificateAccount,
+  getCertificateAccountTypes,
+  listCertificateAccounts,
+  updateCertificateAccount,
+} from './adapters/v1051/certificate-accounts.js'
+import {
+  checkCertificateCname,
+  createCertificateCname,
+  deleteCertificateCname,
+  getCertificateCnameForm,
+  listCertificateCnames,
+  updateCertificateCname,
+} from './adapters/v1051/certificate-cnames.js'
+import {
+  batchOperateCertificateDeployments,
+  createCertificateDeployment,
+  deleteCertificateDeployment,
+  getCertificateDeployment,
+  getCertificateDeploymentForm,
+  getCertificateDeploymentLog,
+  listCertificateDeployments,
+  processCertificateDeployment,
+  resetCertificateDeployment,
+  setCertificateDeploymentStatus,
+  updateCertificateDeployment,
+} from './adapters/v1051/certificate-deployments.js'
+import {
+  batchOperateCertificateOrders,
+  createCertificateOrder,
+  deleteCertificateOrder,
+  getCertificateArtifacts,
+  getCertificateOrder,
+  getCertificateOrderForm,
+  getCertificateOrderLog,
+  listCertificateOrders,
+  processCertificateOrder,
+  resetCertificateOrder,
+  revokeCertificateOrder,
+  setCertificateAutoRenew,
+  updateCertificateOrder,
+} from './adapters/v1051/certificate-orders.js'
+import {
+  getCertificateSettings,
+  updateCertificateSettings,
+} from './adapters/v1051/certificate-settings.js'
+import {
   assignDomainCategory,
   batchDeleteDomains,
   batchImportDomains,
@@ -126,6 +174,9 @@ const AliasIdParamsSchema = z.object({
   aliasId: z.coerce.number().int().positive(),
 })
 const TaskIdParamsSchema = z.object({ taskId: z.coerce.number().int().positive() })
+const CertificateOrderIdParamsSchema = z.object({ orderId: z.coerce.number().int().positive() })
+const CertificateDeploymentIdParamsSchema = z.object({ deploymentId: z.coerce.number().int().positive() })
+const CertificateCnameIdParamsSchema = z.object({ cnameId: z.coerce.number().int().positive() })
 
 function redirect(reply: FastifyReply, location: string) {
   return reply.code(302).header('location', location).send()
@@ -243,6 +294,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         monitoringTyped: true,
         schedulesTyped: true,
         optimizeIpTyped: true,
+        certificatesTyped: true,
         actionTransport: true,
         actionCount: listLegacyOperations().length,
         databaseAccess: database.enabled,
@@ -1009,6 +1061,362 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       ...await runOptimizeIpTask(client, config, upstreamContext(request, config), params.taskId),
     }
   })
+
+  app.get('/api/web/v1/certificate-account-types', async (request) => ({
+    code: 'OK',
+    data: await getCertificateAccountTypes(client, config, upstreamContext(request, config), request.query),
+  }))
+
+  app.get('/api/web/v1/certificate-accounts', async (request) => {
+    const result = await listCertificateAccounts(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/certificate-accounts', async (request) => ({
+    code: 'OK',
+    ...await createCertificateAccount(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/certificate-accounts/:accountId', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCertificateAccount(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        request.query,
+      ),
+    }
+  })
+
+  app.put('/api/web/v1/certificate-accounts/:accountId', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateCertificateAccount(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/certificate-accounts/:accountId', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCertificateAccount(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        request.query,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/certificate-orders/form', async (request) => ({
+    code: 'OK',
+    data: await getCertificateOrderForm(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/certificate-orders', async (request) => {
+    const result = await listCertificateOrders(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/certificate-orders', async (request) => ({
+    code: 'OK',
+    ...await createCertificateOrder(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/certificate-orders/batch', async (request) => ({
+    code: 'OK',
+    ...await batchOperateCertificateOrders(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/certificate-orders/:orderId', async (request) => {
+    const params = CertificateOrderIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCertificateOrder(client, config, upstreamContext(request, config), params.orderId),
+    }
+  })
+
+  app.put('/api/web/v1/certificate-orders/:orderId', async (request) => {
+    const params = CertificateOrderIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateCertificateOrder(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.orderId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/certificate-orders/:orderId', async (request) => {
+    const params = CertificateOrderIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCertificateOrder(client, config, upstreamContext(request, config), params.orderId),
+    }
+  })
+
+  app.get('/api/web/v1/certificate-orders/:orderId/artifacts', async (request) => {
+    const params = CertificateOrderIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCertificateArtifacts(client, config, upstreamContext(request, config), params.orderId),
+    }
+  })
+
+  app.get('/api/web/v1/certificate-orders/:orderId/log', async (request) => {
+    CertificateOrderIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCertificateOrderLog(client, config, upstreamContext(request, config), request.query),
+    }
+  })
+
+  app.patch('/api/web/v1/certificate-orders/:orderId/auto-renew', async (request) => {
+    const params = CertificateOrderIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setCertificateAutoRenew(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.orderId,
+        request.body,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/certificate-orders/:orderId/reset', async (request) => {
+    const params = CertificateOrderIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await resetCertificateOrder(client, config, upstreamContext(request, config), params.orderId),
+    }
+  })
+
+  app.post('/api/web/v1/certificate-orders/:orderId/revoke', async (request) => {
+    const params = CertificateOrderIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await revokeCertificateOrder(client, config, upstreamContext(request, config), params.orderId),
+    }
+  })
+
+  app.post('/api/web/v1/certificate-orders/:orderId/process', async (request) => {
+    const params = CertificateOrderIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await processCertificateOrder(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.orderId,
+        request.body,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/certificate-deployments/form', async (request) => ({
+    code: 'OK',
+    data: await getCertificateDeploymentForm(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/certificate-deployments', async (request) => {
+    const result = await listCertificateDeployments(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/certificate-deployments', async (request) => ({
+    code: 'OK',
+    ...await createCertificateDeployment(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.post('/api/web/v1/certificate-deployments/batch', async (request) => ({
+    code: 'OK',
+    ...await batchOperateCertificateDeployments(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.body,
+    ),
+  }))
+
+  app.get('/api/web/v1/certificate-deployments/:deploymentId', async (request) => {
+    const params = CertificateDeploymentIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCertificateDeployment(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.deploymentId,
+      ),
+    }
+  })
+
+  app.put('/api/web/v1/certificate-deployments/:deploymentId', async (request) => {
+    const params = CertificateDeploymentIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateCertificateDeployment(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.deploymentId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/certificate-deployments/:deploymentId', async (request) => {
+    const params = CertificateDeploymentIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCertificateDeployment(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.deploymentId,
+      ),
+    }
+  })
+
+  app.patch('/api/web/v1/certificate-deployments/:deploymentId/status', async (request) => {
+    const params = CertificateDeploymentIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setCertificateDeploymentStatus(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.deploymentId,
+        request.body,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/certificate-deployments/:deploymentId/reset', async (request) => {
+    const params = CertificateDeploymentIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await resetCertificateDeployment(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.deploymentId,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/certificate-deployments/:deploymentId/process', async (request) => {
+    const params = CertificateDeploymentIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await processCertificateDeployment(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.deploymentId,
+        request.body,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/certificate-deployments/:deploymentId/log', async (request) => {
+    CertificateDeploymentIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCertificateDeploymentLog(client, config, upstreamContext(request, config), request.query),
+    }
+  })
+
+  app.get('/api/web/v1/certificate-cnames/form', async (request) => ({
+    code: 'OK',
+    data: await getCertificateCnameForm(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/certificate-cnames', async (request) => {
+    const result = await listCertificateCnames(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.query,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/certificate-cnames', async (request) => ({
+    code: 'OK',
+    ...await createCertificateCname(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.put('/api/web/v1/certificate-cnames/:cnameId', async (request) => {
+    const params = CertificateCnameIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateCertificateCname(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.cnameId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/certificate-cnames/:cnameId', async (request) => {
+    const params = CertificateCnameIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCertificateCname(client, config, upstreamContext(request, config), params.cnameId),
+    }
+  })
+
+  app.post('/api/web/v1/certificate-cnames/:cnameId/check', async (request) => {
+    const params = CertificateCnameIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await checkCertificateCname(client, config, upstreamContext(request, config), params.cnameId),
+    }
+  })
+
+  app.get('/api/web/v1/certificate-settings', async (request) => ({
+    code: 'OK',
+    data: await getCertificateSettings(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/certificate-settings', async (request) => ({
+    code: 'OK',
+    ...await updateCertificateSettings(client, config, upstreamContext(request, config), request.body),
+  }))
 
   app.get('/api/web/v1/actions', async () => ({
     code: 'OK',

@@ -10,7 +10,7 @@ describe('v1051 operation registry', () => {
     const operations = listLegacyOperations()
     const groups = new Set(operations.map((operation) => operation.group))
 
-    expect(operations).toHaveLength(142)
+    expect(operations).toHaveLength(143)
     expect(groups).toEqual(new Set([
       'certificates',
       'cloudflare',

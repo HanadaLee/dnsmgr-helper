@@ -18,6 +18,8 @@
 - 解析线路、最小 TTL、供应商能力、分组、日志、权重和域名别名转换
 - DNS 监控概览、任务、通知、日志与进程状态的稳定类型化 API
 - 定时切换任务及 CF 优选 IP 设置、额度、任务和立即执行 API
+- 证书账户、订单、制品、自动部署、CNAME 代理和证书计划设置的完整类型化 API
+- 动态证书字段转换为结构化显示条件，列表凭据脱敏，日志文件标识和系统设置键严格校验
 - 未知 dnsmgr 版本保护、统一 JSON 错误和固定上游路径白名单
 
 ## 静态配置
@@ -119,7 +121,7 @@ docker compose ps
 也可以在本地构建后指定镜像：
 
 ```powershell
-docker build --build-arg APP_VERSION=0.4.0 -t dnsmgr-helper:local .
+docker build --build-arg APP_VERSION=0.5.0 -t dnsmgr-helper:local .
 $env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
 docker compose up -d
 ```
@@ -164,10 +166,15 @@ GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变�
 | `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/monitoring...` | 监控概览、任务、通知与日志 |
 | `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/schedules...` | 定时切换任务 |
 | `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/optimize-ip...` | 优选 IP 设置、额度、状态与任务 |
+| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/certificate-accounts...` | 签发与部署账户、类型和动态字段 |
+| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/certificate-orders...` | 订单、续签、执行、日志和证书制品 |
+| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/certificate-deployments...` | 自动部署任务、批量操作和日志 |
+| `GET/POST/PUT/DELETE` | `/api/web/v1/certificate-cnames...` | CNAME 代理和立即验证 |
+| `GET/PUT` | `/api/web/v1/certificate-settings` | 自动续签、部署时段和通知设置 |
 | `GET` | `/api/web/v1/actions` | 当前适配版本允许执行的操作目录 |
 | `POST` | `/api/web/v1/actions/:operationId` | 执行白名单中的 dnsmgr 操作并转换响应 |
 
-账户、域名、分类和解析记录的完整路径、请求字段及示例见 [Web API 文档](docs/web-api.md)。操作入口只接受注册在 v1051 适配器中的固定操作，不接受任意上游 URL。请求体由 `path` 与 `form` 两部分组成；`path` 只填充注册路径中的正整数参数，`form` 会转换成 ThinkPHP/jQuery 兼容的 URL 编码表单。当前操作目录覆盖 142 个原版服务端列表与动作入口，详细范围及尚待类型化的页面初始化数据见 [完整迁移矩阵](docs/migration-matrix.md)。
+账户、域名、分类、解析记录和证书管理的完整路径、请求字段及示例见 [Web API 文档](docs/web-api.md)。操作入口只接受注册在 v1051 适配器中的固定操作，不接受任意上游 URL。请求体由 `path` 与 `form` 两部分组成；`path` 只填充注册路径中的正整数参数，`form` 会转换成 ThinkPHP/jQuery 兼容的 URL 编码表单。当前操作目录覆盖 143 个原版服务端列表与动作入口，详细范围及尚待类型化的页面初始化数据见 [完整迁移矩阵](docs/migration-matrix.md)。
 
 OpenResty 的无认证融合方式和迁移顺序见 [docs/openresty-sso.md](docs/openresty-sso.md)。
 
@@ -180,4 +187,4 @@ npm test
 npm run build
 ```
 
-测试覆盖身份认证 URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、认证关闭模式、Cookie 隔离、上游日志脱敏、v1051 字段转换、账户密钥脱敏、版本化页面状态解析、域名局部更新、记录单项与批量转换、监控/定时/优选 IP 全操作转换、全量操作白名单、PHP 表单编码与动态路径拦截，不会连接真实认证服务、数据库或 DNS 供应商。
+测试覆盖身份认证 URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、认证关闭模式、Cookie 隔离、上游日志脱敏、v1051 字段转换、账户密钥脱敏、版本化页面状态解析、域名局部更新、记录单项与批量转换、监控/定时/优选 IP 全操作转换、证书账户/订单/部署/CNAME/设置全操作转换、证书制品与日志边界、全量操作白名单、PHP 表单编码与动态路径拦截，不会连接真实认证服务、数据库或 DNS 供应商。

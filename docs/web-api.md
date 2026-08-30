@@ -268,6 +268,116 @@
 
 `lineStrategy` 支持 `carrier-lines`、`default-unicom-mobile`；`cdnProvider` 支持 `cloudflare`、`cloudfront`、`gcore`、`edgeone`。优选 IP 表单接口只返回原版已允许的非 Cloudflare DNS 域名。
 
+## 证书管理
+
+### 证书账户
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/certificate-account-types?kind=issuance|deployment` | 签发或部署账户类型、动态字段和能力 |
+| `GET` | `/certificate-accounts?kind=issuance|deployment` | 脱敏账户列表 |
+| `POST` | `/certificate-accounts` | 新增账户并由原 dnsmgr 校验 |
+| `GET` | `/certificate-accounts/:accountId?kind=...` | 管理员编辑回填；包含配置 |
+| `PUT` | `/certificate-accounts/:accountId` | 完整更新并重新校验 |
+| `DELETE` | `/certificate-accounts/:accountId?kind=...` | 删除没有关联订单/任务的账户 |
+
+动态字段的 `visibleWhen` 已转换为 `any -> all -> { field, operator, value }` 的结构化条件，前端不得执行原页面表达式或使用 `eval`。账户列表不返回 `config`、扩展凭据或其他密钥；只有详情接口返回原版编辑页面已经授权的配置。
+
+```json
+{
+  "kind": "issuance",
+  "type": "acme",
+  "name": "生产证书账户",
+  "config": { "email": "admin@example.com", "api_token": "replace-me" },
+  "remark": "自动续签"
+}
+```
+
+### 证书订单
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/certificate-orders/form` | 可选签发账户和 RSA/ECC 密钥参数 |
+| `GET` | `/certificate-orders` | 订单分页、筛选和排序 |
+| `POST` | `/certificate-orders` | 新建托管订单或导入手动证书 |
+| `GET` | `/certificate-orders/:orderId` | 订单详情；手动证书包含编辑回填 PEM |
+| `PUT` | `/certificate-orders/:orderId` | 完整更新订单 |
+| `DELETE` | `/certificate-orders/:orderId` | 删除没有部署任务引用的订单 |
+| `PATCH` | `/certificate-orders/:orderId/auto-renew` | 开关自动续签 |
+| `POST` | `/certificate-orders/:orderId/reset` | 重置订单流程 |
+| `POST` | `/certificate-orders/:orderId/revoke` | 吊销证书 |
+| `POST` | `/certificate-orders/:orderId/process` | 立即执行，可提交 `{ "reset": true }` |
+| `POST` | `/certificate-orders/batch` | 批量删除、重置、开关自动续签 |
+| `GET` | `/certificate-orders/:orderId/log?processId=...` | 读取签发过程日志 |
+| `GET` | `/certificate-orders/:orderId/artifacts` | 显式获取证书、私钥和 Base64 PFX |
+
+托管订单示例：
+
+```json
+{
+  "mode": "managed",
+  "accountId": 3,
+  "keyType": "RSA",
+  "keySize": 2048,
+  "domains": ["example.com", "*.example.com"]
+}
+```
+
+手动导入使用 `{ "mode": "manual", "certificate": "PEM", "privateKey": "PEM" }`。制品接口是敏感操作，返回原版生成的 PFX，当前原版固定 PFX 密码为 `123456`。过程日志只接受 32 位十六进制 `processId`，不会把任意文件名交给原版日志读取逻辑。
+
+### 自动部署
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/certificate-deployments/form` | 部署账户、证书订单和动态任务字段 |
+| `GET` | `/certificate-deployments` | 任务分页、筛选和排序 |
+| `POST` | `/certificate-deployments` | 新增任务 |
+| `GET` | `/certificate-deployments/:deploymentId` | 编辑回填 |
+| `PUT` | `/certificate-deployments/:deploymentId` | 完整更新任务 |
+| `DELETE` | `/certificate-deployments/:deploymentId` | 删除任务 |
+| `PATCH` | `/certificate-deployments/:deploymentId/status` | 启用或停用 |
+| `POST` | `/certificate-deployments/:deploymentId/reset` | 重置任务 |
+| `POST` | `/certificate-deployments/:deploymentId/process` | 立即部署，可先重置 |
+| `POST` | `/certificate-deployments/batch` | 批量删除、重置、启停或更换证书 |
+| `GET` | `/certificate-deployments/:deploymentId/log?processId=...` | 读取部署过程日志 |
+
+```json
+{
+  "accountId": 4,
+  "orderId": 9,
+  "config": { "path": "/etc/nginx/cert.pem", "reload": true },
+  "remark": "边缘入口"
+}
+```
+
+批量更换证书使用 `{ "ids": [11, 12], "action": "assign-certificate", "orderId": 10 }`；其他批量动作是 `delete`、`reset`、`enable`、`disable`。
+
+### CNAME 代理与计划设置
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/certificate-cnames/form` | 可作为 CNAME 目标的本系统域名 |
+| `GET` | `/certificate-cnames` | 代理列表和验证状态 |
+| `POST` | `/certificate-cnames` | 新增代理 |
+| `PUT` | `/certificate-cnames/:cnameId` | 修改目标记录 |
+| `DELETE` | `/certificate-cnames/:cnameId` | 删除代理 |
+| `POST` | `/certificate-cnames/:cnameId/check` | 立即验证 CNAME |
+| `GET` | `/certificate-settings` | 续签天数、部署时段和五类通知模式 |
+| `PUT` | `/certificate-settings` | 局部更新固定的证书设置键 |
+
+```json
+{
+  "renewBeforeDays": 30,
+  "deploymentWindow": { "startHour": 1, "endHour": 22 },
+  "notifications": {
+    "email": "failures-only",
+    "telegram": "all"
+  }
+}
+```
+
+通知模式支持 `off`、`all`、`failures-only`。helper 只会写入证书续签、部署时段和五个通知键，不接受任意系统设置名称。
+
 ## 兼容动作入口
 
 `GET /actions` 与 `POST /actions/:operationId` 是开发迁移期的受控兜底，只接受 v1051 白名单中的固定动作和动态正整数路径参数。新前端应优先使用本文件中的类型化接口；每完成一个功能域，就不应再依赖该域的通用动作入口。
