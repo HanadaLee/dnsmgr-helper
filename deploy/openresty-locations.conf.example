@@ -1,10 +1,12 @@
 # Fragment only. Merge into the existing dns.hanada.info server.
 # OpenResty performs no CAS/JWT/managed-password work for these routes.
+# Keep this origin in sync with server.host/server.port in dnsmgr-helper.json.
+set $dnsmgr_helper_origin http://127.0.0.1:3001;
 
 location ^~ /api/web/v1/ {
     set $no_cache 1;
     proxy_http_version 1.1;
-    proxy_pass http://127.0.0.1:3001;
+    proxy_pass $dnsmgr_helper_origin;
     proxy_set_header Host $host;
     proxy_set_header Cookie $http_cookie;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -16,7 +18,7 @@ location ^~ /api/web/v1/ {
 location ^~ /cas/ {
     set $no_cache 1;
     proxy_http_version 1.1;
-    proxy_pass http://127.0.0.1:3001;
+    proxy_pass $dnsmgr_helper_origin;
     proxy_set_header Host $host;
     proxy_set_header Cookie $http_cookie;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -28,7 +30,7 @@ location ^~ /cas/ {
 location = /login {
     set $no_cache 1;
     proxy_http_version 1.1;
-    proxy_pass http://127.0.0.1:3001;
+    proxy_pass $dnsmgr_helper_origin;
     proxy_set_header Host $host;
     proxy_set_header Cookie $http_cookie;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -40,7 +42,7 @@ location = /login {
 location = /logout {
     set $no_cache 1;
     proxy_http_version 1.1;
-    proxy_pass http://127.0.0.1:3001;
+    proxy_pass $dnsmgr_helper_origin;
     proxy_set_header Host $host;
     proxy_set_header Cookie $http_cookie;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

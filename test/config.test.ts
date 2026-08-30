@@ -44,7 +44,7 @@ default_lang = zh-cn
       server: {
         environment: 'test',
         host: '127.0.0.1',
-        port: 3001,
+        port: 43101,
         publicUrl: 'https://dns.example.com/',
       },
       upstream: {
@@ -66,6 +66,7 @@ default_lang = zh-cn
 
     const config = await loadConfig(configPath)
 
+    expect(config.server).toMatchObject({ host: '127.0.0.1', port: 43101 })
     expect(config.database).toMatchObject({
       enabled: true,
       thinkphpEnvPath,

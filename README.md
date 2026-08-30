@@ -74,7 +74,18 @@ npm run config:check -- config/dnsmgr-helper.json
 npm run dev
 ```
 
-默认监听 `127.0.0.1:3001`。生产环境使用：
+监听地址和端口由静态配置决定，例如：
+
+```json
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 3101
+  }
+}
+```
+
+默认值是 `127.0.0.1:3001`。生产环境使用：
 
 ```powershell
 npm run build
@@ -109,9 +120,9 @@ $env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
 docker compose up -d
 ```
 
-Compose 使用 Linux host 网络。这与默认静态配置的回环监听方式配套：容器内的 `127.0.0.1` 就是宿主机，helper 可以访问同机 OpenResty 的 `/__dnsmgr_legacy/` 私有入口以及本机 MySQL，同时不会把 `3001` 端口发布到外部网卡。默认还会只读挂载 `/usr/local/dnsmgr/etc/thinkphp.env`；若数据库改用 Unix Socket，还需要按 `docker-compose.yml` 中的注释挂载对应 Socket。
+Compose 使用 Linux host 网络。这与静态配置的回环监听方式配套：容器内的 `127.0.0.1` 就是宿主机，helper 可以访问同机 OpenResty 的 `/__dnsmgr_legacy/` 私有入口以及本机 MySQL，同时不会通过 Docker 额外发布端口。默认还会只读挂载 `/usr/local/dnsmgr/etc/thinkphp.env`；若数据库改用 Unix Socket，还需要按 `docker-compose.yml` 中的注释挂载对应 Socket。
 
-镜像和 Compose 健康检查都读取同一个 `dnsmgr-helper.json`，因此修改 `server.port` 时无需再维护第二份端口配置。`/healthz` 只用于容器存活检查；数据库实际可用性仍由 `/readyz` 判断。
+镜像和 Compose 健康检查都读取同一个 `dnsmgr-helper.json`，不会固定使用 `3001`。修改 `server.host` 或 `server.port` 后，只需同步修改 `deploy/openresty-locations.conf.example` 顶部的 `$dnsmgr_helper_origin`，四个代理入口不需要逐一修改。`/healthz` 只用于容器存活检查；数据库实际可用性仍由 `/readyz` 判断。
 
 ## GitLab CI 镜像发布
 

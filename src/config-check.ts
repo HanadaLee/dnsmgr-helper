@@ -5,6 +5,7 @@ const config = await loadConfig(process.argv[2])
 process.stdout.write(`${JSON.stringify({
   valid: true,
   sourcePath: config.sourcePath,
+  listen: `${config.server.host}:${config.server.port}`,
   publicUrl: config.server.publicUrl.href,
   upstreamVersion: config.upstream.version,
   casEnabled: config.cas.enabled,
