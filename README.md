@@ -20,6 +20,8 @@
 - 定时切换任务及 CF 优选 IP 设置、额度、任务和立即执行 API
 - 证书账户、订单、制品、自动部署、CNAME 代理和证书计划设置的完整类型化 API
 - 动态证书字段转换为结构化显示条件，列表凭据脱敏，日志文件标识和系统设置键严格校验
+- Cloudflare 自定义主机名、所有权/证书验证、Fallback、DCV 委派与批量操作 API
+- Cloudflare Tunnel、敏感令牌、Public Hostname、CIDR 和主机名路由的完整 API
 - 未知 dnsmgr 版本保护、统一 JSON 错误和固定上游路径白名单
 
 ## 静态配置
@@ -121,7 +123,7 @@ docker compose ps
 也可以在本地构建后指定镜像：
 
 ```powershell
-docker build --build-arg APP_VERSION=0.5.0 -t dnsmgr-helper:local .
+docker build --build-arg APP_VERSION=0.6.0 -t dnsmgr-helper:local .
 $env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
 docker compose up -d
 ```
@@ -171,6 +173,8 @@ GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变�
 | `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/certificate-deployments...` | 自动部署任务、批量操作和日志 |
 | `GET/POST/PUT/DELETE` | `/api/web/v1/certificate-cnames...` | CNAME 代理和立即验证 |
 | `GET/PUT` | `/api/web/v1/certificate-settings` | 自动续签、部署时段和通知设置 |
+| `GET/POST/PUT/DELETE` | `/api/web/v1/cloudflare/domains/:id...` | 自定义主机名、验证、Fallback、DCV 和默认线路 |
+| `GET/POST/PUT/DELETE` | `/api/web/v1/cloudflare/accounts/:id/tunnels...` | Tunnel、Token、公网主机名、CIDR 和主机名路由 |
 | `GET` | `/api/web/v1/actions` | 当前适配版本允许执行的操作目录 |
 | `POST` | `/api/web/v1/actions/:operationId` | 执行白名单中的 dnsmgr 操作并转换响应 |
 
@@ -187,4 +191,4 @@ npm test
 npm run build
 ```
 
-测试覆盖身份认证 URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、认证关闭模式、Cookie 隔离、上游日志脱敏、v1051 字段转换、账户密钥脱敏、版本化页面状态解析、域名局部更新、记录单项与批量转换、监控/定时/优选 IP 全操作转换、证书账户/订单/部署/CNAME/设置全操作转换、证书制品与日志边界、全量操作白名单、PHP 表单编码与动态路径拦截，不会连接真实认证服务、数据库或 DNS 供应商。
+测试覆盖身份认证 URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、认证关闭模式、Cookie 隔离、上游日志脱敏、v1051 字段转换、账户密钥脱敏、版本化页面状态解析、域名局部更新、记录单项与批量转换、监控/定时/优选 IP 全操作转换、证书账户/订单/部署/CNAME/设置全操作转换、证书制品与日志边界、Cloudflare 自定义主机名与 Tunnel 全操作转换、敏感 Token 和 CIDR/源站输入边界、全量操作白名单、PHP 表单编码与动态路径拦截，不会连接真实认证服务、数据库或 DNS 供应商。

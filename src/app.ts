@@ -60,6 +60,37 @@ import {
   updateCertificateSettings,
 } from './adapters/v1051/certificate-settings.js'
 import {
+  batchAddCloudflareCustomHostnames,
+  batchDeleteCloudflareCustomHostnames,
+  batchUpdateCloudflareCustomHostnames,
+  createCloudflareCustomHostname,
+  deleteCloudflareCustomHostname,
+  deleteCloudflareFallbackOrigin,
+  getCloudflareDcvDelegationUuid,
+  getCloudflareDomainDefaultLine,
+  getCloudflareFallbackOrigin,
+  getCloudflareTxtTargets,
+  listCloudflareCustomHostnames,
+  refreshCloudflareCustomHostname,
+  setCloudflareFallbackOrigin,
+  updateCloudflareCustomHostname,
+} from './adapters/v1051/cloudflare-hostnames.js'
+import {
+  createCloudflareTunnel,
+  createCloudflareTunnelCidrRoute,
+  createCloudflareTunnelHostnameRoute,
+  deleteCloudflareTunnel,
+  deleteCloudflareTunnelCidrRoute,
+  deleteCloudflareTunnelHostnameRoute,
+  deleteCloudflareTunnelPublicHostname,
+  getCloudflareTunnelToken,
+  listCloudflareTunnelCidrRoutes,
+  listCloudflareTunnelHostnameRoutes,
+  listCloudflareTunnelPublicHostnames,
+  listCloudflareTunnels,
+  saveCloudflareTunnelPublicHostname,
+} from './adapters/v1051/cloudflare-tunnels.js'
+import {
   assignDomainCategory,
   batchDeleteDomains,
   batchImportDomains,
@@ -177,6 +208,14 @@ const TaskIdParamsSchema = z.object({ taskId: z.coerce.number().int().positive()
 const CertificateOrderIdParamsSchema = z.object({ orderId: z.coerce.number().int().positive() })
 const CertificateDeploymentIdParamsSchema = z.object({ deploymentId: z.coerce.number().int().positive() })
 const CertificateCnameIdParamsSchema = z.object({ cnameId: z.coerce.number().int().positive() })
+const CloudflareHostnameIdParamsSchema = z.object({
+  domainId: z.coerce.number().int().positive(),
+  hostnameId: z.string().trim().min(1).max(128),
+})
+const CloudflareTunnelIdParamsSchema = z.object({
+  accountId: z.coerce.number().int().positive(),
+  tunnelId: z.string().trim().min(1).max(128),
+})
 
 function redirect(reply: FastifyReply, location: string) {
   return reply.code(302).header('location', location).send()
@@ -295,6 +334,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         schedulesTyped: true,
         optimizeIpTyped: true,
         certificatesTyped: true,
+        cloudflareTyped: true,
         actionTransport: true,
         actionCount: listLegacyOperations().length,
         databaseAccess: database.enabled,
@@ -1417,6 +1457,376 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     code: 'OK',
     ...await updateCertificateSettings(client, config, upstreamContext(request, config), request.body),
   }))
+
+  app.get('/api/web/v1/cloudflare/domains/:domainId/custom-hostnames', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    const result = await listCloudflareCustomHostnames(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.domainId,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/cloudflare/domains/:domainId/custom-hostnames', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await createCloudflareCustomHostname(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/cloudflare/domains/:domainId/custom-hostnames/batch-add', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await batchAddCloudflareCustomHostnames(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.put('/api/web/v1/cloudflare/domains/:domainId/custom-hostnames/batch', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await batchUpdateCloudflareCustomHostnames(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/cloudflare/domains/:domainId/custom-hostnames/batch-delete', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await batchDeleteCloudflareCustomHostnames(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.put('/api/web/v1/cloudflare/domains/:domainId/custom-hostnames/:hostnameId', async (request) => {
+    const params = CloudflareHostnameIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateCloudflareCustomHostname(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        params.hostnameId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/cloudflare/domains/:domainId/custom-hostnames/:hostnameId', async (request) => {
+    const params = CloudflareHostnameIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCloudflareCustomHostname(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        params.hostnameId,
+        request.body,
+      ),
+    }
+  })
+
+  app.post('/api/web/v1/cloudflare/domains/:domainId/custom-hostnames/:hostnameId/refresh', async (request) => {
+    const params = CloudflareHostnameIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await refreshCloudflareCustomHostname(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        params.hostnameId,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/cloudflare/domains/:domainId/txt-targets', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCloudflareTxtTargets(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.query,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/cloudflare/domains/:domainId/fallback-origin', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCloudflareFallbackOrigin(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+      ),
+    }
+  })
+
+  app.put('/api/web/v1/cloudflare/domains/:domainId/fallback-origin', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setCloudflareFallbackOrigin(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/cloudflare/domains/:domainId/fallback-origin', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCloudflareFallbackOrigin(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/cloudflare/domains/:domainId/dcv-delegation', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCloudflareDcvDelegationUuid(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/cloudflare/domains/:domainId/default-line', async (request) => {
+    const params = DomainIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCloudflareDomainDefaultLine(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.domainId,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/cloudflare/accounts/:accountId/tunnels', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    const result = await listCloudflareTunnels(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.accountId,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/cloudflare/accounts/:accountId/tunnels', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await createCloudflareTunnel(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCloudflareTunnel(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        params.tunnelId,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/token', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getCloudflareTunnelToken(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        params.tunnelId,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/public-hostnames', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    const result = await listCloudflareTunnelPublicHostnames(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.accountId,
+      params.tunnelId,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.put('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/public-hostnames', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await saveCloudflareTunnelPublicHostname(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        params.tunnelId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/public-hostnames', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCloudflareTunnelPublicHostname(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        params.tunnelId,
+        request.body,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/cidr-routes', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    const result = await listCloudflareTunnelCidrRoutes(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.accountId,
+      params.tunnelId,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/cidr-routes', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await createCloudflareTunnelCidrRoute(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        params.tunnelId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/cidr-routes', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCloudflareTunnelCidrRoute(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        params.tunnelId,
+        request.body,
+      ),
+    }
+  })
+
+  app.get('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/hostname-routes', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    const result = await listCloudflareTunnelHostnameRoutes(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.accountId,
+      params.tunnelId,
+    )
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/hostname-routes', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await createCloudflareTunnelHostnameRoute(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        params.tunnelId,
+        request.body,
+      ),
+    }
+  })
+
+  app.delete('/api/web/v1/cloudflare/accounts/:accountId/tunnels/:tunnelId/hostname-routes', async (request) => {
+    const params = CloudflareTunnelIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteCloudflareTunnelHostnameRoute(
+        client,
+        config,
+        upstreamContext(request, config),
+        params.accountId,
+        params.tunnelId,
+        request.body,
+      ),
+    }
+  })
 
   app.get('/api/web/v1/actions', async () => ({
     code: 'OK',

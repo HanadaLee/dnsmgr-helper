@@ -453,3 +453,92 @@ export type ProcessLog = {
   content: string
   modifiedAt: number
 }
+
+export type CloudflareValidationRecord = {
+  status?: string
+  txtName?: string
+  txtValue?: string
+  cnameName?: string
+  cnameTarget?: string
+  httpUrl?: string
+  httpBody?: string
+  emails: string[]
+}
+
+export type CloudflareCustomHostname = {
+  id: string
+  hostname: string
+  customOrigin?: string
+  status: string
+  createdAt?: string
+  validationErrors: string[]
+  ownershipVerification: {
+    type?: string
+    name?: string
+    value?: string
+    status: string
+    httpUrl?: string
+    httpBody?: string
+  }
+  ssl: {
+    status: string
+    method: 'txt' | 'http' | 'unknown'
+    minTlsVersion?: string
+    type?: string
+    validationStatus: string
+    validationRecords: CloudflareValidationRecord[]
+  }
+}
+
+export type CloudflareTxtTargetCandidate = {
+  domainId: number
+  domainName: string
+  recordName: string
+  accountId: number
+  accountType: string
+  accountTypeName: string
+  accountDisplayName: string
+  currentDomain: boolean
+}
+
+export type CloudflareDnsLine = {
+  value: string
+  label: string
+  parent?: string
+  default: boolean
+}
+
+export type CloudflareTunnel = {
+  id: string
+  name: string
+  status: string
+  connectionCount: number
+  createdAt?: string
+  deletedAt?: string
+  activeAt?: string
+}
+
+export type CloudflareTunnelPublicHostname = {
+  hostname: string
+  path?: string
+  service: string
+  zoneName?: string
+  zoneId?: string
+}
+
+export type CloudflareTunnelCidrRoute = {
+  id: string
+  network: string
+  comment?: string
+  virtualNetworkId?: string
+  tunnelId?: string
+  createdAt?: string
+}
+
+export type CloudflareTunnelHostnameRoute = {
+  id: string
+  hostname: string
+  comment?: string
+  tunnelId?: string
+  createdAt?: string
+}

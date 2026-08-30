@@ -378,6 +378,61 @@
 
 通知模式支持 `off`、`all`、`failures-only`。helper 只会写入证书续签、部署时段和五个通知键，不接受任意系统设置名称。
 
+## Cloudflare
+
+### 自定义主机名
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/cloudflare/domains/:domainId/custom-hostnames` | 主机名、源站、所有权和证书验证状态 |
+| `POST` | `/cloudflare/domains/:domainId/custom-hostnames` | 新建主机名 |
+| `PUT` | `/cloudflare/domains/:domainId/custom-hostnames/:hostnameId` | 修改源站和证书参数 |
+| `DELETE` | `/cloudflare/domains/:domainId/custom-hostnames/:hostnameId` | 删除主机名 |
+| `POST` | `/cloudflare/domains/:domainId/custom-hostnames/:hostnameId/refresh` | 重新发起验证 |
+| `POST` | `/cloudflare/domains/:domainId/custom-hostnames/batch-add` | 批量新增 |
+| `PUT` | `/cloudflare/domains/:domainId/custom-hostnames/batch` | 批量修改 |
+| `POST` | `/cloudflare/domains/:domainId/custom-hostnames/batch-delete` | 批量删除 |
+| `GET` | `/cloudflare/domains/:domainId/txt-targets?hostname=...` | 为 TXT/CNAME 验证记录匹配本地 DNS 域名和主机记录 |
+| `GET/PUT/DELETE` | `/cloudflare/domains/:domainId/fallback-origin` | 查询、设置或清空 Fallback Origin |
+| `GET` | `/cloudflare/domains/:domainId/dcv-delegation` | DCV 委派 UUID |
+| `GET` | `/cloudflare/domains/:domainId/default-line` | 快速创建验证记录时使用的线路列表和默认线路 |
+
+```json
+{
+  "hostname": "app.example.com",
+  "customOrigin": "origin.example.com",
+  "validationMethod": "txt",
+  "minTlsVersion": "1.2"
+}
+```
+
+`customOrigin` 使用 `null` 表示清空；只接受不带协议、端口、路径、通配符的域名。批量新增把 `hostname` 替换为 `hostnames` 数组；批量更新提交 `ids`、必填的 `customOrigin` 以及可选的验证方法/TLS 版本。列表已把原版嵌套结构整理为 `ownershipVerification`、`ssl.validationRecords` 和 `validationErrors`，足够实现主机名 TXT、证书 TXT、DCV CNAME 的单项和批量快速添加。
+
+验证记录写入流程使用稳定接口组合：先调用 `txt-targets`，再调用目标域名的 `record-options` 或 `default-line`，最后使用 `/domains/:domainId/records` 创建 TXT/CNAME。CF 优选解析复用 `/optimize-ip/tasks` 和记录查询/写入接口，不依赖通用动作入口。
+
+### Cloudflare Tunnel
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET/POST` | `/cloudflare/accounts/:accountId/tunnels` | Tunnel 列表和创建 |
+| `DELETE` | `/cloudflare/accounts/:accountId/tunnels/:tunnelId` | 删除 Tunnel |
+| `GET` | `/cloudflare/accounts/:accountId/tunnels/:tunnelId/token` | 显式获取敏感 Token 和启动命令 |
+| `GET/PUT/DELETE` | `/cloudflare/accounts/:accountId/tunnels/:tunnelId/public-hostnames` | 公网主机名列表、保存和删除；同步 CNAME |
+| `GET/POST/DELETE` | `/cloudflare/accounts/:accountId/tunnels/:tunnelId/cidr-routes` | CIDR 路由列表、新增和删除 |
+| `GET/POST/DELETE` | `/cloudflare/accounts/:accountId/tunnels/:tunnelId/hostname-routes` | 主机名路由列表、新增和删除 |
+
+公网主机名保存示例：
+
+```json
+{
+  "hostname": "app.example.com",
+  "service": "http://127.0.0.1:8080",
+  "path": "/api/*"
+}
+```
+
+删除公网主机名提交 `{ "hostname": "app.example.com", "path": "/api/*" }`。新增 CIDR 提交 `{ "network": "10.0.0.0/8", "comment": "private" }`，删除 CIDR/主机名路由提交 `{ "routeId": "..." }`。Tunnel Token 只由显式 Token 接口返回，不出现在列表或其他详情中。
+
 ## 兼容动作入口
 
 `GET /actions` 与 `POST /actions/:operationId` 是开发迁移期的受控兜底，只接受 v1051 白名单中的固定动作和动态正整数路径参数。新前端应优先使用本文件中的类型化接口；每完成一个功能域，就不应再依赖该域的通用动作入口。
