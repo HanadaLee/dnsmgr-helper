@@ -1,0 +1,37 @@
+services:
+  dnsmgr-helper:
+    image: "${DNSMGR_HELPER_IMAGE:-registry.hanada.info/hanada/dnsmgr-helper:latest}"
+    container_name: dnsmgr-helper
+    restart: always
+    init: true
+
+    # helper、OpenResty 私有 legacy 入口和数据库都在同一主机时使用 host 网络。
+    # 此时配置中的 127.0.0.1 指向宿主机，并且 helper 仍只监听回环地址。
+    network_mode: host
+
+    environment:
+      TZ: Asia/Shanghai
+      DNSMGR_HELPER_CONFIG: /app/config/dnsmgr-helper.json
+
+    volumes:
+      - ./config/dnsmgr-helper.json:/app/config/dnsmgr-helper.json:ro
+      - "${DNSMGR_THINKPHP_ENV_PATH:-/usr/local/dnsmgr/etc/thinkphp.env}:/app/config/thinkphp.env:ro"
+      # database.socketPath 使用 Unix Socket 时，另行挂载相同的宿主机路径：
+      # - /run/mysqld/mysqld.sock:/run/mysqld/mysqld.sock:ro
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ["CMD", "node", "/app/deploy/docker-healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+    stop_grace_period: 15s

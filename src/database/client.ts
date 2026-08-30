@@ -30,7 +30,7 @@ export class DatabaseClient {
       connectTimeout: config.connectTimeoutMs,
       waitForConnections: true,
       enableKeepAlive: true,
-      charset: 'utf8mb4',
+      charset: config.charset,
       ...(config.ssl ? { ssl: { rejectUnauthorized: true } } : {}),
     }
     this.pool = createPool(options)

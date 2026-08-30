@@ -43,7 +43,20 @@ npm run config:check -- config/dnsmgr-helper.json
 
 ### 数据库配置
 
-`database.enabled=true` 后 helper 会建立 `mysql2` 连接池。可以配置主机/端口或 Unix Socket、数据库名、用户、密码、连接数、超时和 TLS 开关。
+`database.enabled=true` 后 helper 会建立 `mysql2` 连接池。数据库信息既可以直接写在 JSON 中，也可以通过 `database.thinkphpEnvPath` 读取原 dnsmgr 的 `thinkphp.env`。后一种方式会从 `[DATABASE]` 加载 `HOSTNAME`、`HOSTPORT`、`DATABASE`、`USERNAME`、`PASSWORD`、`CHARSET` 和 `PREFIX`，并覆盖 JSON 中的对应字段；连接池大小、超时、TLS 和 Unix Socket 仍由 helper JSON 控制。
+
+Docker Compose 默认把宿主机 `/usr/local/dnsmgr/etc/thinkphp.env` 只读映射为 `/app/config/thinkphp.env`。宿主机路径可通过 Compose 变量 `DNSMGR_THINKPHP_ENV_PATH` 调整。启用时只需要：
+
+```json
+{
+  "database": {
+    "enabled": true,
+    "thinkphpEnvPath": "/app/config/thinkphp.env"
+  }
+}
+```
+
+这里是字段示意；请在完整示例 JSON 上修改。helper 不会输出数据库密码，`thinkphp.env` 也不会被复制到镜像。
 
 - `/healthz` 只报告数据库功能是否启用；
 - `/readyz` 会执行 `SELECT 1`，连接失败时返回 HTTP 503；
@@ -67,6 +80,49 @@ npm run dev
 npm run build
 npm start
 ```
+
+## Docker 部署
+
+镜像不会包含真实配置。首次部署先在宿主机生成并校验静态配置：
+
+```powershell
+Copy-Item config/dnsmgr-helper.example.json config/dnsmgr-helper.json
+npm run config:check -- config/dnsmgr-helper.json
+```
+
+默认 Compose 镜像为 `registry.hanada.info/hanada/dnsmgr-helper:latest`，配置文件以只读方式挂载：
+
+```powershell
+docker compose pull
+docker compose run --rm --no-deps --entrypoint node dnsmgr-helper dist/config-check.js /app/config/dnsmgr-helper.json
+docker compose up -d
+docker compose ps
+```
+
+上面的容器内校验会同时读取已经映射的 `thinkphp.env`，适用于 JSON 中配置了容器路径 `/app/config/thinkphp.env` 的情况。两个挂载文件都必须对镜像中的非 root 用户（UID 1000）可读；无需、也不应赋予写权限。
+
+也可以在本地构建后指定镜像：
+
+```powershell
+docker build --build-arg APP_VERSION=0.1.0 -t dnsmgr-helper:local .
+$env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
+docker compose up -d
+```
+
+Compose 使用 Linux host 网络。这与默认静态配置的回环监听方式配套：容器内的 `127.0.0.1` 就是宿主机，helper 可以访问同机 OpenResty 的 `/__dnsmgr_legacy/` 私有入口以及本机 MySQL，同时不会把 `3001` 端口发布到外部网卡。默认还会只读挂载 `/usr/local/dnsmgr/etc/thinkphp.env`；若数据库改用 Unix Socket，还需要按 `docker-compose.yml` 中的注释挂载对应 Socket。
+
+镜像和 Compose 健康检查都读取同一个 `dnsmgr-helper.json`，因此修改 `server.port` 时无需再维护第二份端口配置。`/healthz` 只用于容器存活检查；数据库实际可用性仍由 `/readyz` 判断。
+
+## GitLab CI 镜像发布
+
+`.gitlab-ci.yml` 沿用 CPA-Helper 的发布方式：
+
+- 在 `debian-x86_64` Runner 上执行示例配置校验、类型检查、测试和构建；
+- 分别在 `debian-x86_64`、`debian-aarch64` Runner 上构建并推送架构镜像；
+- 合并为 `${VERSION}` 和 `latest` 两个多架构 Harbor manifest；
+- 只在 `main` 或 `ext` 分支发布镜像，其他分支和合并请求只执行验证。
+
+GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变量。发布版本读取根目录 `VERSION`，并由 Docker 构建检查它与 `package.json` 的 `version` 完全一致。
 
 ## HTTP 路径
 

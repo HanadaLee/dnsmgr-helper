@@ -9,4 +9,7 @@ process.stdout.write(`${JSON.stringify({
   upstreamVersion: config.upstream.version,
   casEnabled: config.cas.enabled,
   databaseEnabled: config.database.enabled,
+  databaseConfigSource: !config.database.enabled
+    ? 'disabled'
+    : config.database.thinkphpEnvPath ? 'thinkphp-env' : 'static-json',
 }, null, 2)}\n`)

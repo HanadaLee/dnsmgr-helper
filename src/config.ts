@@ -82,12 +82,15 @@ const ConfigSchema = z.object({
   }),
   database: z.object({
     enabled: z.boolean().default(false),
+    thinkphpEnvPath: OptionalNonEmptyString,
     host: z.string().min(1).default('127.0.0.1'),
     port: z.number().int().min(1).max(65_535).default(3306),
     socketPath: OptionalNonEmptyString,
     user: z.string().min(1).default('dnsmgr_helper'),
     password: z.string().default(''),
     name: z.string().min(1).default('dnsmgr'),
+    charset: z.string().regex(/^[A-Za-z0-9_-]+$/).default('utf8mb4'),
+    tablePrefix: z.string().regex(/^[A-Za-z0-9_]*$/).default(''),
     connectionLimit: z.number().int().min(1).max(100).default(5),
     connectTimeoutMs: z.number().int().min(100).max(300_000).default(10_000),
     ssl: z.boolean().default(false),
@@ -143,6 +146,124 @@ function normalizedBaseUrl(value: string): URL {
   return url
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function unquoteIniValue(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed.length < 2) return trimmed
+
+  const first = trimmed[0]
+  const last = trimmed.at(-1)
+  return (first === '"' || first === "'") && last === first
+    ? trimmed.slice(1, -1)
+    : trimmed
+}
+
+function parseThinkphpDatabaseEnv(source: string, sourcePath: string): Record<string, unknown> {
+  const values = new Map<string, string>()
+  let section = ''
+
+  for (const rawLine of source.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith(';') || line.startsWith('#')) continue
+
+    const sectionMatch = /^\[([^\]]+)]$/.exec(line)
+    if (sectionMatch) {
+      section = sectionMatch[1]?.trim().toUpperCase() ?? ''
+      continue
+    }
+    if (section !== 'DATABASE') continue
+
+    const separator = line.indexOf('=')
+    if (separator <= 0) continue
+
+    const key = line.slice(0, separator).trim().toUpperCase()
+    const value = unquoteIniValue(line.slice(separator + 1))
+    values.set(key, value)
+  }
+
+  if (values.size === 0) {
+    throw new Error(`ThinkPHP 环境文件 ${sourcePath} 缺少 [DATABASE] 配置段`)
+  }
+
+  const databaseType = values.get('TYPE')
+  if (databaseType && databaseType.toLowerCase() !== 'mysql') {
+    throw new Error(`ThinkPHP 环境文件 ${sourcePath} 的 DATABASE.TYPE 只支持 mysql`)
+  }
+
+  const requiredValue = (key: string, allowEmpty = false): string => {
+    const value = values.get(key)
+    if (value === undefined || (!allowEmpty && value === '')) {
+      throw new Error(`ThinkPHP 环境文件 ${sourcePath} 缺少 DATABASE.${key}`)
+    }
+    return value
+  }
+
+  const host = requiredValue('HOSTNAME')
+  const name = requiredValue('DATABASE')
+  const user = requiredValue('USERNAME')
+  const password = requiredValue('PASSWORD', true)
+  const rawPort = values.get('HOSTPORT')
+  const charset = values.get('CHARSET')
+  const tablePrefix = values.get('PREFIX')
+
+  if (rawPort !== undefined && !/^\d+$/.test(rawPort)) {
+    throw new Error(`ThinkPHP 环境文件 ${sourcePath} 的 DATABASE.HOSTPORT 必须是端口号`)
+  }
+  if (charset !== undefined && charset === '') {
+    throw new Error(`ThinkPHP 环境文件 ${sourcePath} 的 DATABASE.CHARSET 不能为空`)
+  }
+
+  return {
+    host,
+    name,
+    user,
+    password,
+    ...(rawPort !== undefined ? { port: Number(rawPort) } : {}),
+    ...(charset !== undefined ? { charset } : {}),
+    ...(tablePrefix !== undefined ? { tablePrefix } : {}),
+  }
+}
+
+async function mergeThinkphpDatabaseConfig(
+  input: unknown,
+  configPath: string,
+): Promise<unknown> {
+  if (!isRecord(input) || !isRecord(input.database)) return input
+
+  const database = input.database
+  const configuredPath = database.thinkphpEnvPath
+  if (database.enabled !== true
+    || typeof configuredPath !== 'string'
+    || configuredPath.trim() === '') {
+    return input
+  }
+
+  const sourcePath = path.isAbsolute(configuredPath)
+    ? path.resolve(configuredPath)
+    : path.resolve(path.dirname(configPath), configuredPath)
+
+  let source: string
+  try {
+    source = await readFile(sourcePath, 'utf8')
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`无法读取 ThinkPHP 环境文件 ${sourcePath}: ${reason}`)
+  }
+
+  const credentials = parseThinkphpDatabaseEnv(source, sourcePath)
+  return {
+    ...input,
+    database: {
+      ...database,
+      ...credentials,
+      thinkphpEnvPath: sourcePath,
+    },
+  }
+}
+
 export function parseConfig(input: unknown, sourcePath?: string): AppConfig {
   const parsed = ConfigSchema.parse(input)
   const { baseUrl, validationUrl, ...cas } = parsed.cas
@@ -186,5 +307,6 @@ export async function loadConfig(configPath = process.env.DNSMGR_HELPER_CONFIG):
     throw new Error(`dnsmgr-helper 配置文件不是有效 JSON: ${reason}`)
   }
 
-  return parseConfig(input, resolvedPath)
+  const mergedInput = await mergeThinkphpDatabaseConfig(input, resolvedPath)
+  return parseConfig(mergedInput, resolvedPath)
 }

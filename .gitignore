@@ -3,5 +3,6 @@ dist/
 coverage/
 .env
 /config/dnsmgr-helper.json
+/config/thinkphp.env
 *.log
 .DS_Store
