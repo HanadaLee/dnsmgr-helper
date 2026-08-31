@@ -4,16 +4,15 @@ import type { AppConfig } from '../../config.js'
 import type { PageMeta, UserDetail, UserFormOptions, UserSummary } from '../../contracts.js'
 import { ApiError } from '../../errors.js'
 import type { DnsmgrClient, RequestContext } from '../../upstream/client.js'
-import { requireUpstreamHtml } from '../../upstream/legacy.js'
 import {
   booleanValue,
   integerValue,
   objectValue,
   operationMessage,
   pagedOperation,
+  rowsFromOperation,
   stringValue,
 } from './automation-common.js'
-import { namedSelectOptions } from './html-state.js'
 import { executeLegacyOperation } from './operations.js'
 
 const UserSortMap = {
@@ -137,10 +136,21 @@ export async function getUserFormOptions(
   config: AppConfig,
   context: RequestContext,
 ): Promise<UserFormOptions> {
-  const html = requireUpstreamHtml(await client.getHtml('/user', context), config)
-  const domains = namedSelectOptions(html, 'permission[]')
-    .map((option) => option.value || option.label)
-    .filter(Boolean)
+  // Do not scrape the legacy /user document here. A document redirect to
+  // /login would otherwise turn this auxiliary form request into a 401 and
+  // send the whole SPA through CAS again. The authenticated AJAX list exposes
+  // the same domain names without depending on legacy page rendering.
+  const result = await executeLegacyOperation(client, config, context, 'domains.list', {
+    form: {
+      offset: 0,
+      limit: 10_000,
+      sortName: 'name',
+      sortOrder: 'asc',
+    },
+  })
+  const domains = rowsFromOperation(result, '原 dnsmgr 域名列表格式不兼容')
+    .map((row) => stringValue(row.name))
+    .filter((domain): domain is string => Boolean(domain))
   return { domains: Array.from(new Set(domains)) }
 }
 

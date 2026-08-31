@@ -133,10 +133,15 @@ describe('dashboard, users and logs', () => {
 
   it('covers user CRUD, permission options and logs without leaking credential internals', async () => {
     const app = await appWith((url, init) => {
-      if (url.pathname === '/internal/user' && init.method === 'GET') {
-        return html(`<select name="permission[]" multiple>
-          <option value="example.com">example.com</option><option value="example.net">example.net</option>
-        </select>`)
+      if (url.pathname === '/internal/domain/data') {
+        expect(new Headers(init.headers).get('x-requested-with')).toBe('XMLHttpRequest')
+        expect(Object.fromEntries(form(init))).toEqual({
+          offset: '0', limit: '10000', sortName: 'name', sortOrder: 'asc',
+        })
+        return json({ total: 2, rows: [
+          { id: 1, name: 'example.com' },
+          { id: 2, name: 'example.net' },
+        ] })
       }
       if (url.pathname === '/internal/user/data') {
         expect(Object.fromEntries(form(init))).toEqual({
