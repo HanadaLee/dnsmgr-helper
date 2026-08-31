@@ -14,7 +14,7 @@ OpenResty 不再加载或执行站点级 CAS/SSO 逻辑，只负责 TLS、公开
 
 ```text
 浏览器
-  ├─ /cas/login ───────────────> dnsmgr-helper ──302──> CAS
+  ├─ /login ───────────────────> dnsmgr-helper ──302──> CAS
   ├─ /cas/callback?ticket=... ─> dnsmgr-helper
   │                                  ├─ CAS serviceValidate
   │                                  ├─ 原 dnsmgr 登录/必要时注册
@@ -42,8 +42,9 @@ OpenResty：只转发以上路径，不解析 Ticket、不签 JWT、不托管用
 以现有 DNS 站点为基础审核并采用完整的 [`deploy/http_dns.hanada.info.conf.example`](../deploy/http_dns.hanada.info.conf.example)：
 
 - `/api/web/v1/`、`/cas/`、`/login`、`/logout` 转发到 helper；
-- 原 `/api` 可以继续直达 dnsmgr；helper 也已实现相同固定公开路径，切换时不改变 API Key 签名和响应格式；
-- `/setpwd`、`/system/loginset` 可以继续做普通外部跳转，它们不再参与认证。
+- 原 `/api` 按当前部署约定继续直达 dnsmgr；helper 也保留相同固定公开路径用于独立部署，但网关无需绕行 helper；
+- `/quicklogin`、`/cron`、`/dmtask/status`、`/optimizeip/status` 精确转发到 helper，不能落入前端 SPA；
+- `/setpwd`、`/system/loginset` 不再由网关改写；新前端分别通过个人资料和系统设置 API 提供对应能力。
 
 helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原 dnsmgr；OpenResty 不再为 helper 提供 legacy 中转路径。
 
@@ -77,7 +78,7 @@ helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原
 1. 填写 helper 静态配置，但暂时保持 `cas.enabled=false`；
 2. 确认 helper `/healthz`、`/readyz` 和只读 API 可访问；
 3. 填写 `sessionSecret`、管理员和托管密码，把 `cas.enabled` 改为 `true`；
-4. 在本机验证 `/cas/login` 能完成回调并获得三个 Cookie；
+4. 在本机验证透明入口 `/login` 能完成回调并获得三个 Cookie；
 5. 再把 DNS 站点的 CAS、login、logout 路径切到 helper，同时删除站点级 Lua SSO；
 6. 验证登录、自动创建用户、退出、域名和解析记录；
 7. 最后再切换 `/next/` 或根路径的新前端。
@@ -106,4 +107,4 @@ location / {
 }
 ```
 
-未登录前端请求 API 时会收到 JSON 401，其中的 `details.loginPath` 指向 helper 的 `/cas/login`；不会再由 OpenResty 把 `fetch()` 重定向到 CAS HTML。
+未登录前端请求 API 时会收到 JSON 401，其中的 `details.loginPath` 固定指向透明入口 `/login`；不会再由 OpenResty 把 `fetch()` 重定向到认证 HTML。

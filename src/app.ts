@@ -102,11 +102,13 @@ import {
   createDomainCategory,
   deleteDomain,
   deleteDomainCategory,
+  getDomainExpirySettings,
   listDomainCategories,
   queueDomainExpiryRefresh,
   refreshDomainExpiry,
   updateDomain,
   updateDomainCategory,
+  updateDomainExpirySettings,
 } from './adapters/v1051/domain-actions.js'
 import { getDomain, listDomains, listRecords } from './adapters/v1051/domains.js'
 import { listAuditLogs } from './adapters/v1051/logs.js'
@@ -172,6 +174,7 @@ import {
   updateScheduledTask,
 } from './adapters/v1051/schedules.js'
 import { sessionFromUpstream } from './adapters/v1051/session.js'
+import { getDashboardReleaseInfo } from './adapters/v1051/release-check.js'
 import {
   bindTotp,
   changePassword,
@@ -183,6 +186,7 @@ import {
 import {
   forwardCron,
   forwardPublicApi,
+  forwardQuickLogin,
   forwardWorkerStatus,
 } from './adapters/v1051/public-compat.js'
 import {
@@ -207,7 +211,7 @@ import {
   updateUser,
 } from './adapters/v1051/users.js'
 import { casLoginUrl, casLogoutUrl, CasClient, safeReturnTo } from './auth/cas-client.js'
-import { createCasSession, verifyCasSession } from './auth/cas.js'
+import { createCasSession, createDomainSession, verifyCasSession } from './auth/cas.js'
 import { cookieValues, serializeHttpOnlyCookie } from './auth/cookies.js'
 import { LegacySsoService } from './auth/legacy-sso.js'
 import { loadConfig, type AppConfig } from './config.js'
@@ -222,6 +226,24 @@ export type BuildAppOptions = {
   config?: AppConfig
   fetcher?: FetchLike
   logger?: boolean
+}
+
+export function requestUrlForLog(rawUrl: string | undefined): string {
+  if (!rawUrl) return ''
+  const queryAt = rawUrl.indexOf('?')
+  const pathname = queryAt === -1 ? rawUrl : rawUrl.slice(0, queryAt)
+  if (pathname === '/quicklogin' && queryAt !== -1) return '/quicklogin?[redacted]'
+  return rawUrl.replace(/([?&]ticket=)[^&]*/gi, '$1[redacted]')
+}
+
+function requestLogSerializer(request: FastifyRequest) {
+  return {
+    method: request.method,
+    url: requestUrlForLog(request.url),
+    host: request.host,
+    remoteAddress: request.ip,
+    remotePort: request.raw.socket.remotePort ?? 0,
+  }
 }
 
 const ADAPTER_VERSION = '1051'
@@ -267,6 +289,30 @@ function relayUpstream(reply: FastifyReply, result: UpstreamResult) {
   return reply.send(result.text)
 }
 
+function upstreamCookieValue(result: UpstreamResult, name: string): string | undefined {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const expression = new RegExp(`(?:^|,\\s*)${escapedName}=([^;,]*)`, 'i')
+  for (const setCookie of result.setCookies) {
+    const value = expression.exec(setCookie)?.[1]
+    if (!value) continue
+    try {
+      return decodeURIComponent(value)
+    } catch {
+      return value
+    }
+  }
+  return undefined
+}
+
+function isDomainLoginRedirect(location: string | undefined): boolean {
+  if (!location) return false
+  try {
+    return /^\/record\/\d+\/?$/.test(new URL(location, 'https://dnsmgr.invalid').pathname)
+  } catch {
+    return false
+  }
+}
+
 function cookieOptions(config: AppConfig, maxAge: number) {
   return {
     maxAge,
@@ -279,7 +325,9 @@ function cookieOptions(config: AppConfig, maxAge: number) {
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const config = options.config ?? await loadConfig()
   const app = Fastify({
-    logger: options.logger ?? config.server.environment !== 'test',
+    logger: options.logger ?? (config.server.environment === 'test'
+      ? false
+      : { serializers: { req: requestLogSerializer } }),
     trustProxy: true,
   })
   const client = new DnsmgrClient(config, options.fetcher)
@@ -299,7 +347,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     if (request.url.startsWith('/api/')
       || request.url.startsWith('/cas/')
       || request.url.startsWith('/login')
-      || request.url.startsWith('/logout')) {
+      || request.url.startsWith('/logout')
+      || request.url.startsWith('/quicklogin')) {
       reply.header('cache-control', 'private, no-store')
       reply.header('vary', 'Cookie')
     }
@@ -384,6 +433,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         cloudflareTyped: true,
         administrationTyped: true,
         publicApiCompatible: true,
+        quickLoginCompatible: true,
         cronCompatible: true,
         actionTransport: true,
         actionCount: listLegacyOperations().length,
@@ -400,7 +450,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const callbackHandler = async (request: FastifyRequest, reply: FastifyReply) => {
     const query = CallbackQuerySchema.parse(request.query)
     const returnTo = safeReturnTo(query.returnTo)
-    const profile = await casClient.validate(query.ticket, returnTo)
+    let profile: CasProfile
+    try {
+      profile = await casClient.validate(query.ticket, returnTo)
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'CAS_TICKET_INVALID') {
+        return redirect(reply, `/login?${new URLSearchParams({ returnTo })}`)
+      }
+      throw error
+    }
     const legacyToken = await legacySso.loginOrRegister(profile, upstreamRequestMetadata(request))
     const helperSession = await createCasSession(profile, config)
     const sessionMaxAge = config.cas.sessionTtlSeconds
@@ -439,7 +497,6 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   app.get(config.cas.callbackPath, callbackHandler)
   app.get(config.cas.logoutPath, logoutHandler)
   if (config.cas.loginPath !== '/login') app.get('/login', loginHandler)
-  if (config.cas.loginPath !== '/cas/register') app.get('/cas/register', loginHandler)
   if (config.cas.logoutPath !== '/logout') app.get('/logout', logoutHandler)
 
   const publicApiContext = (request: FastifyRequest) => upstreamRequestMetadata(request)
@@ -473,6 +530,40 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     reply,
     await forwardCron(client, publicApiContext(request), request.query),
   ))
+  app.get('/quicklogin', async (request, reply) => {
+    const { domain, result } = await forwardQuickLogin(
+      client,
+      publicApiContext(request),
+      request.query,
+    )
+    const legacyToken = isDomainLoginRedirect(result.location)
+      ? upstreamCookieValue(result, config.legacySso.sessionCookie)
+      : undefined
+    if (legacyToken) {
+      const maxAge = config.cas.sessionTtlSeconds
+      const cookies = [
+        serializeHttpOnlyCookie(
+          config.legacySso.bridgeCookie,
+          legacyToken,
+          cookieOptions(config, maxAge),
+        ),
+        serializeHttpOnlyCookie(
+          config.legacySso.sessionCookie,
+          legacyToken,
+          cookieOptions(config, maxAge),
+        ),
+      ]
+      if (config.cas.enabled) {
+        cookies.unshift(serializeHttpOnlyCookie(
+          config.cas.sessionCookie,
+          await createDomainSession(domain, config),
+          cookieOptions(config, maxAge),
+        ))
+      }
+      reply.header('set-cookie', cookies)
+    }
+    return relayUpstream(reply, result)
+  })
   for (const path of ['/dmtask/status', '/optimizeip/status'] as const) {
     app.route({
       method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -527,6 +618,16 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   app.post('/api/web/v1/domains/expiry-refresh', async (request) => ({
     code: 'OK',
     ...await queueDomainExpiryRefresh(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/domains/expiry-settings', async (request) => ({
+    code: 'OK',
+    data: await getDomainExpirySettings(client, config, upstreamContext(request, config)),
+  }))
+
+  app.put('/api/web/v1/domains/expiry-settings', async (request) => ({
+    code: 'OK',
+    ...await updateDomainExpirySettings(client, config, upstreamContext(request, config), request.body),
   }))
 
   app.get('/api/web/v1/domains/:domainId', async (request) => {
@@ -768,6 +869,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         upstreamContext(request, config),
         params.domainId,
         params.recordId,
+        request.body,
       ),
     }
   })
@@ -1923,6 +2025,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   app.get('/api/web/v1/dashboard', async (request) => ({
     code: 'OK',
     data: await getDashboardOverview(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/dashboard/release', async (request) => ({
+    code: 'OK',
+    data: await getDashboardReleaseInfo(config, options.fetcher ?? fetch, request.log),
   }))
 
   app.post('/api/web/v1/dashboard/cache/clear', async (request) => ({

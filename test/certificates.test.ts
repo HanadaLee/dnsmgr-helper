@@ -185,11 +185,10 @@ describe('typed certificate API', () => {
         }
         return json({ total: 1, rows: [orderRow] })
       }
-      if (url.pathname === '/internal/cert/order') {
+      if (url.pathname === '/internal/cert/order/get') {
         expect(form(init).get('id')).toBe('9')
         return json({ code: 0, data: {
-          id: 9, crt: 'CERTIFICATE', key: 'PRIVATE KEY', pfx: 'UEZY',
-          issuetime: '2026-08-01 00:00:00', expiretime: '2026-11-01 00:00:00', domains: ['example.com'],
+          fullchain: 'CERTIFICATE', privatekey: 'PRIVATE KEY', pfx: 'UEZY',
         } })
       }
       if (url.pathname === '/internal/cert/order/show_log') {
@@ -278,7 +277,7 @@ describe('typed certificate API', () => {
     expect(artifacts.json()).toEqual({
       code: 'OK',
       data: {
-        id: 9, domains: ['example.com'], certificate: 'CERTIFICATE', privateKey: 'PRIVATE KEY',
+        id: 9, domains: ['example.com', '*.example.com'], certificate: 'CERTIFICATE', privateKey: 'PRIVATE KEY',
         pfxBase64: 'UEZY', pfxPassword: '123456',
         issuedAt: '2026-08-01 00:00:00', expiresAt: '2026-11-01 00:00:00',
       },

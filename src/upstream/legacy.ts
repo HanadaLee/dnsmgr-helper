@@ -62,11 +62,11 @@ export function isLoginRedirect(result: UpstreamResult): boolean {
 }
 
 export function authenticationError(
-  config: AppConfig,
+  _config: AppConfig,
   source: 'helper-session' | 'legacy-upstream' = 'legacy-upstream',
 ): ApiError {
   return new ApiError(401, 'AUTH_REQUIRED', '请通过统一身份认证登录', {
-    loginPath: config.cas.loginPath,
+    loginPath: '/login',
     source,
   })
 }

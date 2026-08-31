@@ -53,6 +53,7 @@ export function sessionFromUpstream(
         ...(casProfile?.email ? { email: casProfile.email } : {}),
         ...(casProfile?.avatar ? { avatar: casProfile.avatar } : {}),
         type: 'domain',
+        domainId: Number(domainMatch[1]),
       },
       capabilities: {
         dashboard: false,
@@ -69,8 +70,8 @@ export function sessionFromUpstream(
       },
       sso: {
         profileVerified: Boolean(casProfile),
-        loginPath: config.cas.loginPath,
-        logoutPath: config.cas.logoutPath,
+        loginPath: '/login',
+        logoutPath: '/logout',
       },
       upstream: {
         configuredVersion: config.upstream.version,
@@ -109,8 +110,8 @@ export function sessionFromUpstream(
     capabilities: capabilitiesFromDashboard(html),
     sso: {
       profileVerified: Boolean(casProfile),
-      loginPath: config.cas.loginPath,
-      logoutPath: config.cas.logoutPath,
+      loginPath: '/login',
+      logoutPath: '/logout',
     },
     upstream: {
       configuredVersion: config.upstream.version,

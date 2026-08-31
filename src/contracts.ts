@@ -28,6 +28,7 @@ export type WebSession = {
     avatar?: string
     registeredAt?: string
     type: 'user' | 'domain' | 'unknown'
+    domainId?: number
   }
   capabilities: SessionCapabilities
   sso: {
@@ -84,6 +85,15 @@ export type DashboardOverview = {
     webServer?: string
     serverTime?: string
   }
+}
+
+export type DashboardReleaseInfo = {
+  status: 'current' | 'update-available' | 'unavailable' | 'disabled'
+  currentBuild: string
+  latestBuild?: string
+  latestVersion?: string
+  checkedAt?: string
+  releaseUrl?: string
 }
 
 export type UserSummary = {
@@ -210,11 +220,23 @@ export type DomainSummary = {
   remark?: string
 }
 
+export type DomainExpirySettings = {
+  reminderDays: number[]
+  notifications: {
+    email: boolean
+    wechat: boolean
+    telegram: boolean
+    robotWebhook: boolean
+    customWebhook: boolean
+  }
+}
+
 export type DnsRecord = {
   id: string
   name: string
   type: string
   value: string
+  values?: string[]
   line: {
     id: string
     label: string
@@ -222,6 +244,9 @@ export type DnsRecord = {
   ttl?: number
   mxPriority?: number
   weight?: number
+  mode?: number
+  parentId?: string
+  childCount?: number
   remark?: string
   updatedAt?: string
   status: 'enabled' | 'disabled' | 'unknown'
@@ -323,6 +348,7 @@ export type RecordOptions = {
     weightedSets: boolean
     domainAliases: boolean
     customHostnames: boolean
+    hierarchicalRecords: boolean
   }
 }
 
@@ -353,6 +379,7 @@ export type DnsRecordSnapshot = {
   lineLabel?: string
   ttl: number
   value?: string
+  values?: string[]
 }
 
 export type MonitoringOverview = {

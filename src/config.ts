@@ -55,6 +55,15 @@ const ConfigSchema = z.object({
     version: z.string().regex(/^\d+$/).default('1051'),
     requestTimeoutMs: z.number().int().min(100).max(300_000).default(15_000),
   }),
+  releaseCheck: z.object({
+    enabled: z.boolean().default(true),
+    url: z.url().default('https://auth.cccyun.cc/app/dnsmgr.php'),
+    requestTimeoutMs: z.number().int().min(100).max(300_000).default(10_000),
+  }).default({
+    enabled: true,
+    url: 'https://auth.cccyun.cc/app/dnsmgr.php',
+    requestTimeoutMs: 10_000,
+  }),
   cas: z.object({
     enabled: z.boolean().default(true),
     baseUrl: OptionalUrl,
@@ -138,10 +147,11 @@ const ConfigSchema = z.object({
 
 type ParsedConfig = z.output<typeof ConfigSchema>
 
-export type AppConfig = Omit<ParsedConfig, 'server' | 'upstream' | 'cas'> & {
+export type AppConfig = Omit<ParsedConfig, 'server' | 'upstream' | 'cas' | 'releaseCheck'> & {
   sourcePath?: string
   server: Omit<ParsedConfig['server'], 'publicUrl'> & { publicUrl: URL }
   upstream: Omit<ParsedConfig['upstream'], 'url'> & { url: URL }
+  releaseCheck: Omit<ParsedConfig['releaseCheck'], 'url'> & { url: URL }
   cas: Omit<ParsedConfig['cas'], 'baseUrl' | 'validationUrl'> & {
     baseUrl?: URL
     validationUrl?: URL
@@ -286,6 +296,10 @@ export function parseConfig(input: unknown, sourcePath?: string): AppConfig {
     upstream: {
       ...parsed.upstream,
       url: normalizedBaseUrl(parsed.upstream.url),
+    },
+    releaseCheck: {
+      ...parsed.releaseCheck,
+      url: new URL(parsed.releaseCheck.url),
     },
     cas: {
       ...cas,

@@ -4,11 +4,12 @@ import {
   domainAccountDetailFromHtml,
   providerDefinitionsFromHtml,
 } from '../src/adapters/v1051/accounts.js'
-import { embeddedJsonAssignment } from '../src/adapters/v1051/html-state.js'
+import { embeddedJsonAssignment, namedTextareaValue } from '../src/adapters/v1051/html-state.js'
 import {
   domainAliasesFromHtml,
   recordOptionsFromHtml,
 } from '../src/adapters/v1051/record-actions.js'
+import { domainFromRecordPage, normalizeRecord } from '../src/adapters/v1051/domains.js'
 
 const providerState = {
   cloudflare: {
@@ -68,6 +69,15 @@ describe('v1051 embedded page state', () => {
       message: 'a; } ] b',
       nested: [{ ok: true }],
     })
+  })
+
+  it('preserves exact multiline textarea templates while decoding HTML entities', () => {
+    const html = `<textarea name="template">{
+  &quot;content&quot;: &quot;&lt;b&gt;hello  world&lt;/b&gt;&quot;
+}</textarea>`
+    expect(namedTextareaValue(html, 'template')).toBe(`{
+  "content": "<b>hello  world</b>"
+}`)
   })
 
   it('normalizes provider form definitions and marks credential fields as sensitive', () => {
@@ -132,8 +142,64 @@ describe('v1051 embedded page state', () => {
         recordRemark: 'inline', recordStatus: true, redirectRecords: true,
         recordLogs: false, recordWeight: true, clientPaging: false,
         recordSorting: true, recordGroups: false, weightedSets: false,
-        domainAliases: false, customHostnames: false,
+        domainAliases: false, customHostnames: false, hierarchicalRecords: false,
       },
+    })
+  })
+
+  it('recovers the minimal domain context from an authorized record page', () => {
+    const html = `<html><head><title>解析管理 - example.com</title></head><body><script>
+      var recordLine = [{"id":"0","name":"默认"}];
+      var dnsconfig = {"type":"cloudflare","name":"Cloudflare"};
+      </script></body></html>`
+
+    expect(domainFromRecordPage(html, 42)).toEqual({
+      id: 42,
+      name: 'example.com',
+      provider: { type: 'cloudflare', label: 'Cloudflare' },
+      recordCount: 0,
+      expiryLookup: 'unknown',
+      noticeEnabled: false,
+      hidden: false,
+      ssoEnabled: true,
+    })
+  })
+
+  it('preserves QingCloud parent sets and child record modes', () => {
+    expect(normalizeRecord({
+      RecordId: 'parent-1', Name: 'www', Count: '3', Remark: '入口记录',
+    })).toEqual({
+      id: 'parent-1', name: 'www', type: 'UNKNOWN', value: '',
+      line: { id: '', label: '默认' }, childCount: 3, remark: '入口记录', status: 'unknown',
+    })
+
+    expect(normalizeRecord({
+      RecordId: 'child-1', Name: 'www', Type: 'A', Value: '192.0.2.10',
+      Line: '0', LineName: '默认', TTL: '600', Weight: '30', Mode: '3',
+      ParentId: 'parent-1', Status: '1',
+    })).toEqual({
+      id: 'child-1', name: 'www', type: 'A', value: '192.0.2.10',
+      line: { id: '0', label: '默认' }, ttl: 600, weight: 30, mode: 3,
+      parentId: 'parent-1', status: 'enabled',
+    })
+
+    const qingcloudHtml = `<input name="ttl" min="60"><script>
+      var recordLine = [{"id":"0","name":"默认"}];
+      var dnsconfig = {"type":"qingcloud"};
+      </script>`
+    const qingcloudOptions = recordOptionsFromHtml(qingcloudHtml)
+    expect(qingcloudOptions.capabilities.hierarchicalRecords).toBe(true)
+    expect(qingcloudOptions.recordTypes).toEqual(['A', 'CNAME', 'AAAA', 'NS', 'MX', 'TXT'])
+  })
+
+  it('preserves each value when a provider returns an array-valued record', () => {
+    expect(normalizeRecord({
+      RecordId: 'multi-1', Name: 'mail', Type: 'MX', Value: ['mx1.example.net', 'mx2.example.net'],
+      Line: '0', LineName: '默认', Status: '1',
+    })).toMatchObject({
+      id: 'multi-1',
+      value: 'mx1.example.net,mx2.example.net',
+      values: ['mx1.example.net', 'mx2.example.net'],
     })
   })
 

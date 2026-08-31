@@ -4,14 +4,22 @@ import type { AppConfig } from '../../config.js'
 import type { DnsRecord, DomainSummary, PageMeta } from '../../contracts.js'
 import { ApiError } from '../../errors.js'
 import type { DnsmgrClient, RequestContext } from '../../upstream/client.js'
-import { requireUpstreamJson } from '../../upstream/legacy.js'
+import { requireUpstreamHtml, requireUpstreamJson } from '../../upstream/legacy.js'
+import { embeddedJsonAssignment, plainText } from './html-state.js'
 
 const DomainSortMap = {
   id: 'id',
   name: 'name',
   recordCount: 'recordcount',
   addedAt: 'addtime',
+  registeredAt: 'regtime',
   expiresAt: 'expiretime',
+  noticeEnabled: 'is_notice',
+  hidden: 'is_hide',
+  domainLoginEnabled: 'is_sso',
+  provider: 'typename',
+  category: 'category_name',
+  remark: 'remark',
 } as const
 
 const RecordSortMap = {
@@ -26,6 +34,7 @@ export const DomainsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   q: z.string().trim().max(255).optional(),
+  accountId: z.coerce.number().int().positive().optional(),
   provider: z.string().trim().max(32).optional(),
   expiryStatus: z.enum(['expiring', 'expired']).optional(),
   categoryId: z.coerce.number().int().min(0).optional(),
@@ -41,6 +50,7 @@ export const RecordsQuerySchema = z.object({
   value: z.string().trim().max(2048).optional(),
   type: z.string().trim().max(32).optional(),
   line: z.string().trim().max(255).optional(),
+  groupId: z.string().trim().max(255).optional(),
   status: z.enum(['enabled', 'disabled']).optional(),
   sort: z.enum(Object.keys(RecordSortMap) as [keyof typeof RecordSortMap]).default('name'),
   order: z.enum(['asc', 'desc']).default('asc'),
@@ -159,6 +169,38 @@ function normalizeDomain(row: LegacyRow): DomainSummary {
   }
 }
 
+export function domainFromRecordPage(html: string, domainId: number): DomainSummary {
+  if (/域名不存在/.test(plainText(html) ?? '')) {
+    throw new ApiError(404, 'DOMAIN_NOT_FOUND', '域名不存在')
+  }
+
+  const title = /<title\b[^>]*>\s*解析管理\s*-\s*([\s\S]*?)<\/title>/i.exec(html)
+  const name = plainText(title?.[1])
+  const rawConfig = embeddedJsonAssignment(html, 'dnsconfig')
+  if (!name || !rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig)) {
+    throw new ApiError(502, 'UPSTREAM_ADAPTER_MISMATCH', '原 dnsmgr 的域名解析页面格式不兼容')
+  }
+
+  const providerType = optionalString((rawConfig as LegacyRow).type)
+  if (!providerType) {
+    throw new ApiError(502, 'UPSTREAM_ADAPTER_MISMATCH', '原 dnsmgr 的域名解析页面缺少 DNS 服务商信息')
+  }
+
+  return {
+    id: domainId,
+    name,
+    provider: {
+      type: providerType,
+      label: plainText((rawConfig as LegacyRow).name) ?? providerType,
+    },
+    recordCount: 0,
+    expiryLookup: 'unknown',
+    noticeEnabled: false,
+    hidden: false,
+    ssoEnabled: true,
+  }
+}
+
 export function normalizeRecord(row: LegacyRow): DnsRecord {
   const id = optionalString(row.RecordId)
   if (!id) {
@@ -170,18 +212,23 @@ export function normalizeRecord(row: LegacyRow): DnsRecord {
   const ttl = numberValue(row.TTL)
   const mxPriority = numberValue(row.MX)
   const weight = numberValue(row.Weight)
+  const mode = numberValue(row.Mode)
+  const parentId = optionalString(row.ParentId ?? row.parentid)
+  const childCount = numberValue(row.Count)
   const remark = optionalString(row.Remark)
   const updatedAt = optionalString(row.UpdateTime)
 
-  const rawValue = Array.isArray(row.Value)
-    ? row.Value.map((value) => optionalString(value) ?? '').filter(Boolean).join(',')
-    : optionalString(row.Value) ?? ''
+  const rawValues = Array.isArray(row.Value)
+    ? row.Value.map((value) => optionalString(value) ?? '').filter(Boolean)
+    : undefined
+  const rawValue = rawValues?.join(',') ?? optionalString(row.Value) ?? ''
 
   return {
     id,
     name: optionalString(row.Name) ?? '@',
     type: optionalString(row.Type) ?? 'UNKNOWN',
     value: rawValue,
+    ...(rawValues ? { values: rawValues } : {}),
     line: {
       id: lineId,
       label: optionalString(row.LineName) ?? (lineId || '默认'),
@@ -189,6 +236,9 @@ export function normalizeRecord(row: LegacyRow): DnsRecord {
     ...(ttl === undefined ? {} : { ttl }),
     ...(mxPriority === undefined ? {} : { mxPriority }),
     ...(weight === undefined ? {} : { weight }),
+    ...(mode === undefined ? {} : { mode: Math.trunc(mode) }),
+    ...(parentId ? { parentId } : {}),
+    ...(childCount === undefined ? {} : { childCount: Math.max(0, Math.trunc(childCount)) }),
     ...(remark ? { remark } : {}),
     ...(updatedAt ? { updatedAt } : {}),
     status: rawStatus === '1' ? 'enabled' : rawStatus === '0' ? 'disabled' : 'unknown',
@@ -208,6 +258,7 @@ export async function listDomains(
   form.set('sortName', DomainSortMap[query.sort])
   form.set('sortOrder', query.order)
   stringParam(form, 'kw', query.q)
+  stringParam(form, 'aid', query.accountId)
   stringParam(form, 'type', query.provider)
   stringParam(form, 'status', query.expiryStatus === 'expiring' ? '1' : query.expiryStatus === 'expired' ? '2' : undefined)
   stringParam(form, 'cid', query.categoryId)
@@ -239,8 +290,13 @@ export async function getDomain(
     config,
   )
   const row = legacyRows(payload).rows[0]
-  if (!row) throw new ApiError(404, 'DOMAIN_NOT_FOUND', '域名不存在或当前用户无权访问')
-  return normalizeDomain(row)
+  if (row) return normalizeDomain(row)
+
+  // Domain-scoped quick-login sessions cannot access /domain/data in dnsmgr 1.0.5.1,
+  // but they can access their permission-checked /record/:id page. Recover only the
+  // minimal read-only context needed by the separated record-management screen.
+  const html = requireUpstreamHtml(await client.getHtml(`/record/${domainId}`, context), config)
+  return domainFromRecordPage(html, domainId)
 }
 
 export async function listRecords(
@@ -261,6 +317,7 @@ export async function listRecords(
   stringParam(form, 'value', query.value)
   stringParam(form, 'type', query.type)
   stringParam(form, 'line', query.line)
+  stringParam(form, 'groupid', query.groupId)
   stringParam(form, 'status', query.status === 'enabled' ? '1' : query.status === 'disabled' ? '0' : undefined)
 
   const payload = requireUpstreamJson(

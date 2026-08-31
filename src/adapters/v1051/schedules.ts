@@ -59,6 +59,7 @@ export const ScheduledTasksQuerySchema = z.object({
 
 const ScheduleRecordSchema = z.object({
   value: z.string().trim().max(4096).optional(),
+  values: z.array(z.string().trim().min(1).max(4096)).min(1).max(1000).optional(),
   lineId: z.string().trim().max(255),
   lineLabel: z.string().trim().max(255).optional(),
   ttl: z.coerce.number().int().min(0).max(2_147_483_647),
@@ -192,7 +193,7 @@ function scheduledTaskForm(rawBody: unknown) {
     line: LineModeCode[body.lineMode],
     remark: body.remark ?? '',
     recordinfo: JSON.stringify({
-      Value: body.record.value ?? '',
+      Value: body.record.values?.length ? body.record.values : body.record.value ?? '',
       Line: body.record.lineId,
       LineName: body.record.lineLabel ?? '',
       TTL: body.record.ttl,

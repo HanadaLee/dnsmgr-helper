@@ -17,8 +17,8 @@ server {
     lua_config force_https_redirect on;
 
     # Keep the existing EdgeResty parent/origin selection. The server-level
-    # local target remains the stock dnsmgr instance for the temporary /api
-    # compatibility route. Locations below override it for helper/frontend.
+    # local target remains the stock dnsmgr instance for the signed public API.
+    # Locations below override it for helper/frontend.
     include snippet/http_parent_map_cnhksp.conf;
     lua_config proxy_select_origin https://as-hk-hcw-tencent-307.ipv4.hanada.ltd;
     condition is_origin str_eq $hostname as-hk-hcw-tencent-307;
@@ -36,14 +36,6 @@ server {
     location = /robots.txt {
         default_type text/plain;
         return 200 "User-Agent: *\nDisallow: /";
-    }
-
-    location = /setpwd {
-        return 302 https://cas.hanada.info/account;
-    }
-
-    location = /system/loginset {
-        return 302 https://cas.hanada.info/organizations/hanada;
     }
 
     # dnsmgr-helper owns CAS, the helper session and the compatibility API.
@@ -81,8 +73,37 @@ server {
         include snippet/http_proxy_select_pass.conf;
     }
 
-    # Temporary compatibility for the stock dnsmgr API. Remove this location
-    # after every required operation has a helper-owned stable endpoint.
+    # Public execution/status endpoints and domain-scoped quick login are also
+    # owned by the compatibility service. In particular, /quicklogin must not
+    # fall through to the frontend SPA.
+    location = /quicklogin {
+        lua_config client_cache bust;
+        set $no_cache 1;
+        proxy_request_header_control set Cookie $http_cookie;
+        lua_config proxy_select_local http://127.0.0.1:19102;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    location = /cron {
+        set $no_cache 1;
+        lua_config proxy_select_local http://127.0.0.1:19102;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    location = /dmtask/status {
+        set $no_cache 1;
+        lua_config proxy_select_local http://127.0.0.1:19102;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    location = /optimizeip/status {
+        set $no_cache 1;
+        lua_config proxy_select_local http://127.0.0.1:19102;
+        include snippet/http_proxy_select_pass.conf;
+    }
+
+    # Keep the signed public API on the stock dnsmgr service as requested. The
+    # browser-facing stable API remains under /api/web/v1/ on the helper.
     location /api {
         include snippet/http_json_error_pages.conf;
         set $no_cache 1;

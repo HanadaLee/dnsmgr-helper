@@ -1,10 +1,12 @@
 import { z } from 'zod'
 
 import type { AppConfig } from '../../config.js'
-import type { DomainCategory, PageMeta } from '../../contracts.js'
+import type { DomainCategory, DomainExpirySettings, PageMeta } from '../../contracts.js'
 import { ApiError } from '../../errors.js'
 import type { DnsmgrClient, RequestContext } from '../../upstream/client.js'
+import { requireUpstreamHtml } from '../../upstream/legacy.js'
 import { getDomain } from './domains.js'
+import { namedElementAttribute } from './html-state.js'
 import { executeLegacyOperation } from './operations.js'
 
 const PositiveId = z.coerce.number().int().positive()
@@ -57,6 +59,21 @@ export const BatchDomainNoticeSchema = z.object({
 }).strict()
 
 export const BatchDomainIdsSchema = z.object({ ids: IdList }).strict()
+
+export const DomainExpirySettingsSchema = z.object({
+  reminderDays: z.array(z.coerce.number().int().min(0).max(36_500)).max(100),
+  notifications: z.object({
+    email: z.boolean(),
+    wechat: z.boolean(),
+    telegram: z.boolean(),
+    robotWebhook: z.boolean(),
+    customWebhook: z.boolean(),
+  }).strict(),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.reminderDays).size !== value.reminderDays.length) {
+    context.addIssue({ code: 'custom', path: ['reminderDays'], message: '提醒天数不能重复' })
+  }
+})
 
 const CategorySortMap = {
   id: 'id',
@@ -242,6 +259,53 @@ export async function refreshDomainExpiry(
 ) {
   const result = await executeLegacyOperation(client, config, context, 'domains.refreshExpiry', {
     form: { id: domainId },
+  })
+  return operationMessage(result.message)
+}
+
+function expirySwitch(html: string, name: string): boolean {
+  return namedElementAttribute(html, 'select', name, 'default') === '1'
+}
+
+export async function getDomainExpirySettings(
+  client: DnsmgrClient,
+  config: AppConfig,
+  context: RequestContext,
+): Promise<DomainExpirySettings> {
+  const html = requireUpstreamHtml(await client.getHtml('/domain/expirenotice', context), config)
+  const rawDays = namedElementAttribute(html, 'input', 'expire_noticedays', 'value') ?? ''
+  const reminderDays = rawDays.split(',').map((value) => value.trim()).filter(Boolean).map(Number)
+  if (reminderDays.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 36_500)) {
+    throw new ApiError(502, 'UPSTREAM_ADAPTER_MISMATCH', '原 dnsmgr 的域名到期提醒天数格式不兼容')
+  }
+  return {
+    reminderDays,
+    notifications: {
+      email: expirySwitch(html, 'expire_notice_mail'),
+      wechat: expirySwitch(html, 'expire_notice_wxtpl'),
+      telegram: expirySwitch(html, 'expire_notice_tgbot'),
+      robotWebhook: expirySwitch(html, 'expire_notice_webhook'),
+      customWebhook: expirySwitch(html, 'expire_notice_custom_webhook'),
+    },
+  }
+}
+
+export async function updateDomainExpirySettings(
+  client: DnsmgrClient,
+  config: AppConfig,
+  context: RequestContext,
+  rawBody: unknown,
+) {
+  const body = DomainExpirySettingsSchema.parse(rawBody)
+  const result = await executeLegacyOperation(client, config, context, 'domains.updateExpirySettings', {
+    form: {
+      expire_noticedays: body.reminderDays.join(','),
+      expire_notice_mail: body.notifications.email ? 1 : 0,
+      expire_notice_wxtpl: body.notifications.wechat ? 1 : 0,
+      expire_notice_tgbot: body.notifications.telegram ? 1 : 0,
+      expire_notice_webhook: body.notifications.robotWebhook ? 1 : 0,
+      expire_notice_custom_webhook: body.notifications.customWebhook ? 1 : 0,
+    },
   })
   return operationMessage(result.message)
 }

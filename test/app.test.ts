@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { buildApp } from '../src/app.js'
+import { buildApp, requestUrlForLog } from '../src/app.js'
 import { createCasSession, verifyCasProfile } from '../src/auth/cas.js'
 import { parseConfig, type AppConfig } from '../src/config.js'
 import type { CasProfile } from '../src/contracts.js'
@@ -11,6 +11,14 @@ const apps: Awaited<ReturnType<typeof buildApp>>[] = []
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()))
   vi.restoreAllMocks()
+})
+
+describe('request log redaction', () => {
+  it('redacts public login tokens and ticket values without hiding ordinary query fields', () => {
+    expect(requestUrlForLog('/quicklogin?domain=example.com&token=secret')).toBe('/quicklogin?[redacted]')
+    expect(requestUrlForLog('/cas/callback?returnTo=%2F&ticket=ST-secret')).toBe('/cas/callback?returnTo=%2F&ticket=[redacted]')
+    expect(requestUrlForLog('/api/web/v1/domains?page=2')).toBe('/api/web/v1/domains?page=2')
+  })
 })
 
 type ConfigOverrides = {
@@ -300,7 +308,7 @@ describe('helper-owned CAS flow', () => {
     expect(userLoginCount).toBe(2)
   })
 
-  it('does not contact dnsmgr when CAS rejects the ticket', async () => {
+  it('restarts login without showing an error page when CAS rejects an expired ticket', async () => {
     const fetcher = vi.fn(fakeFetch((url) => {
       expect(url.hostname).toBe('cas.test')
       return new Response(`
@@ -316,8 +324,8 @@ describe('helper-owned CAS flow', () => {
       url: '/cas/callback?ticket=ST-invalid&returnTo=%2F',
     })
 
-    expect(response.statusCode).toBe(401)
-    expect(response.json()).toMatchObject({ code: 'CAS_TICKET_INVALID' })
+    expect(response.statusCode).toBe(302)
+    expect(response.headers.location).toBe('/login?returnTo=%2F')
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
@@ -363,6 +371,30 @@ describe('helper-owned CAS flow', () => {
 })
 
 describe('session compatibility', () => {
+  it('returns the assigned domain when the original site redirects a domain-only user', async () => {
+    const appConfig = config()
+    const cookie = await authenticatedCookies(appConfig)
+    const fetcher = fakeFetch(() => new Response('', {
+      status: 302,
+      headers: { location: '/record/42' },
+    }))
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/session',
+      headers: { cookie },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      data: {
+        user: { type: 'domain', domainId: 42 },
+        capabilities: { dashboard: false, domains: true, domainAccounts: false },
+      },
+    })
+  })
+
   it('requires a helper CAS session and forwards only the legacy cookie upstream', async () => {
     const appConfig = config()
     const cookie = await authenticatedCookies(appConfig)
@@ -397,7 +429,7 @@ describe('session compatibility', () => {
       data: {
         user: { name: 'hanada', displayName: 'Hanada', type: 'user' },
         capabilities: { dashboard: true, domains: true, systemSettings: true },
-        sso: { profileVerified: true, loginPath: '/cas/login', logoutPath: '/cas/logout' },
+        sso: { profileVerified: true, loginPath: '/login', logoutPath: '/logout' },
       },
     })
   })
@@ -415,7 +447,7 @@ describe('session compatibility', () => {
     expect(response.statusCode).toBe(401)
     expect(response.json()).toMatchObject({
       code: 'AUTH_REQUIRED',
-      details: { loginPath: '/cas/login' },
+      details: { loginPath: '/login' },
     })
     expect(fetcher).not.toHaveBeenCalled()
   })
@@ -482,7 +514,7 @@ describe('v1051 list translation', () => {
       const form = new URLSearchParams(String(init.body))
       expect(Object.fromEntries(form)).toMatchObject({
         offset: '10', limit: '10', sortName: 'recordcount', sortOrder: 'asc',
-        kw: 'example', type: 'cloudflare', status: '2',
+        kw: 'example', aid: '7', type: 'cloudflare', status: '2',
       })
 
       return Response.json({
@@ -490,7 +522,8 @@ describe('v1051 list translation', () => {
         rows: [{
           id: '42', name: 'example.com', aid: '7', type: 'cloudflare',
           typename: 'Cloudflare', aremark: '主账号', recordcount: '18',
-          addtime: '2025-02-03 04:05:06', expiretime: '2027-02-03 00:00:00',
+          addtime: '2025-02-03 04:05:06', regtime: '2024-01-02 03:04:05',
+          expiretime: '2027-02-03 00:00:00', cid: '3',
           checkstatus: '1', is_notice: '1', is_hide: '0', is_sso: 0,
           category_name: '生产', remark: '主域名', password: 'must-not-leak',
         }],
@@ -500,7 +533,7 @@ describe('v1051 list translation', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/web/v1/domains?page=2&pageSize=10&q=example&provider=cloudflare&expiryStatus=expired&sort=recordCount&order=asc',
+      url: '/api/web/v1/domains?page=2&pageSize=10&q=example&accountId=7&provider=cloudflare&expiryStatus=expired&sort=recordCount&order=asc',
       headers: { cookie: await authenticatedCookies(appConfig, 'session') },
     })
 
@@ -513,16 +546,92 @@ describe('v1051 list translation', () => {
         provider: { type: 'cloudflare', label: 'Cloudflare', accountId: 7, accountLabel: '主账号' },
         recordCount: 18,
         addedAt: '2025-02-03 04:05:06',
+        registeredAt: '2024-01-02 03:04:05',
         expiresAt: '2027-02-03 00:00:00',
         expiryLookup: 'ready',
         noticeEnabled: true,
         hidden: false,
         ssoEnabled: false,
+        categoryId: 3,
         category: '生产',
         remark: '主域名',
       }],
       meta: { page: 2, pageSize: 10, total: 12 },
     })
+  })
+
+  it.each([
+    ['registeredAt', 'regtime'],
+    ['noticeEnabled', 'is_notice'],
+    ['hidden', 'is_hide'],
+    ['domainLoginEnabled', 'is_sso'],
+    ['provider', 'typename'],
+    ['category', 'category_name'],
+    ['remark', 'remark'],
+  ])('maps the domain %s sort key to %s', async (sort, legacySort) => {
+    const appConfig = config()
+    const fetcher = fakeFetch((url, init) => {
+      expect(url.pathname).toBe('/internal/domain/data')
+      const form = new URLSearchParams(String(init.body))
+      expect(form.get('sortName')).toBe(legacySort)
+      return Response.json({ total: 0, rows: [] })
+    })
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/web/v1/domains?sort=${sort}&order=desc`,
+      headers: { cookie: await authenticatedCookies(appConfig, 'session') },
+    })
+
+    expect(response.statusCode).toBe(200)
+  })
+
+  it('reads and writes domain expiry reminder settings through fixed keys', async () => {
+    const appConfig = config()
+    const fetcher = fakeFetch((url, init) => {
+      expect(url.pathname).toBe('/internal/domain/expirenotice')
+      if (init.method === 'GET') {
+        return new Response(`<input name="expire_noticedays" value="7,14">
+          <select name="expire_notice_mail" default="1"></select>
+          <select name="expire_notice_wxtpl" default="0"></select>
+          <select name="expire_notice_tgbot" default="1"></select>
+          <select name="expire_notice_webhook" default="0"></select>
+          <select name="expire_notice_custom_webhook" default="1"></select>`, {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        })
+      }
+      expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({
+        expire_noticedays: '3,10',
+        expire_notice_mail: '0',
+        expire_notice_wxtpl: '1',
+        expire_notice_tgbot: '0',
+        expire_notice_webhook: '1',
+        expire_notice_custom_webhook: '0',
+      })
+      return Response.json({ code: 0, msg: '设置保存成功！' })
+    })
+    const app = await appWith(fetcher, appConfig)
+    const headers = { cookie: await authenticatedCookies(appConfig, 'session') }
+    const read = await app.inject({ method: 'GET', url: '/api/web/v1/domains/expiry-settings', headers })
+    expect(read.statusCode).toBe(200)
+    expect(read.json()).toEqual({
+      code: 'OK',
+      data: {
+        reminderDays: [7, 14],
+        notifications: { email: true, wechat: false, telegram: true, robotWebhook: false, customWebhook: true },
+      },
+    })
+
+    const write = await app.inject({
+      method: 'PUT', url: '/api/web/v1/domains/expiry-settings', headers,
+      payload: {
+        reminderDays: [3, 10],
+        notifications: { email: false, wechat: true, telegram: false, robotWebhook: true, customWebhook: false },
+      },
+    })
+    expect(write.statusCode).toBe(200)
+    expect(write.json()).toEqual({ code: 'OK', message: '设置保存成功！' })
   })
 
   it('applies stable paging when a DNS provider returns a client-side array', async () => {
@@ -531,7 +640,7 @@ describe('v1051 list translation', () => {
       expect(url.pathname).toBe('/internal/record/data/9')
       const form = new URLSearchParams(String(init.body))
       expect(Object.fromEntries(form)).toMatchObject({
-        offset: '2', limit: '2', sortName: 'Name', sortOrder: 'asc', status: '1',
+        offset: '2', limit: '2', sortName: 'Name', sortOrder: 'asc', groupid: 'group-1', status: '1',
       })
       return Response.json([
         { RecordId: 'r1', Name: '@', Type: 'A', Value: '192.0.2.1', Line: '0', LineName: '默认', TTL: 600, Status: '1' },
@@ -544,7 +653,7 @@ describe('v1051 list translation', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/web/v1/domains/9/records?page=2&pageSize=2&status=enabled',
+      url: '/api/web/v1/domains/9/records?page=2&pageSize=2&groupId=group-1&status=enabled',
       headers: { cookie: await authenticatedCookies(appConfig, 'session') },
     })
 
@@ -825,6 +934,51 @@ describe('typed domain management API', () => {
 })
 
 describe('typed record management API', () => {
+  it('loads domain context for a domain-scoped session through its authorized record page', async () => {
+    const appConfig = config()
+    let requestNumber = 0
+    const fetcher = fakeFetch((url, init) => {
+      requestNumber += 1
+      if (requestNumber === 1) {
+        expect(url.pathname).toBe('/internal/domain/data')
+        expect(init.method).toBe('POST')
+        return Response.json({ total: 0, rows: [] })
+      }
+
+      expect(url.pathname).toBe('/internal/record/42')
+      const headers = new Headers(init.headers)
+      expect(headers.get('accept')).toBe('text/html, application/xhtml+xml')
+      expect(headers.get('x-requested-with')).toBeNull()
+      return new Response(`<html><head><title>解析管理 - example.com</title></head><body><script>
+        var recordLine = [{"id":"0","name":"默认"}];
+        var dnsconfig = {"type":"cloudflare","name":"Cloudflare"};
+      </script></body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+    })
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/domains/42',
+      headers: { cookie: await authenticatedCookies(appConfig) },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      code: 'OK',
+      data: {
+        id: 42,
+        name: 'example.com',
+        provider: { type: 'cloudflare', label: 'Cloudflare' },
+        recordCount: 0,
+        expiryLookup: 'unknown',
+        noticeEnabled: false,
+        hidden: false,
+        ssoEnabled: true,
+      },
+    })
+    expect(requestNumber).toBe(2)
+  })
+
   it('loads versioned record-page state in document mode and exposes stable capabilities', async () => {
     const appConfig = config()
     const fetcher = fakeFetch((url, init) => {
@@ -908,6 +1062,36 @@ describe('typed record management API', () => {
 
     expect(create.json()).toEqual({ code: 'OK', message: '添加解析记录成功！' })
     expect(batch.json()).toEqual({ code: 'OK', message: '批量修改解析线路，成功1条，失败0条' })
+  })
+
+  it('preserves the deleted record snapshot so dnsmgr can write a complete audit log', async () => {
+    const appConfig = config()
+    const fetcher = fakeFetch((url, init) => {
+      expect(url.pathname).toBe('/internal/record/delete/42')
+      const form = new URLSearchParams(String(init.body))
+      expect(form.get('recordid')).toBe('r1')
+      expect(JSON.parse(String(form.get('recordinfo')))).toEqual({
+        RecordId: 'r1', Name: 'www', Type: 'A', Value: ['192.0.2.1', '192.0.2.2'], Line: '0',
+        TTL: 600, MX: 1, Weight: 0, Remark: 'web',
+      })
+      return Response.json({ code: 0, msg: '删除解析记录成功！' })
+    })
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/web/v1/domains/42/records/r1',
+      headers: { cookie: await authenticatedCookies(appConfig) },
+      payload: {
+        current: {
+          id: 'r1', name: 'www', type: 'A', value: '192.0.2.1,192.0.2.2',
+          values: ['192.0.2.1', '192.0.2.2'], lineId: '0',
+          ttl: 600, mxPriority: 1, weight: 0, remark: 'web',
+        },
+      },
+    })
+
+    expect(response.json()).toEqual({ code: 'OK', message: '删除解析记录成功！' })
   })
 
   it('rejects malformed typed record writes before any upstream request', async () => {
@@ -1006,7 +1190,7 @@ describe('typed record management API', () => {
     expect(weights.json()).toEqual({
       code: 'OK',
       data: [{
-        id: 'set-1', lookupName: 'www', subdomain: 'www.example.com', type: 'A',
+        id: 'www.example.com:A', lookupName: 'www', subdomain: 'www.example.com', type: 'A',
         recordCount: 2, enabled: true,
         lineAlgorithms: [{ lineId: '0', enabled: true }, { lineId: 'oversea', enabled: false }],
       }],

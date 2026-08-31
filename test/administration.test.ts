@@ -58,6 +58,12 @@ function form(init: RequestInit) {
   return new URLSearchParams(String(init.body))
 }
 
+function browserCookies(response: { headers: Record<string, string | string[] | number | undefined> }) {
+  const header = response.headers['set-cookie']
+  const values = Array.isArray(header) ? header : typeof header === 'string' ? [header] : []
+  return values.map((value) => value.split(';', 1)[0]).join('; ')
+}
+
 const headers = { cookie: 'user_token=legacy-administrator-session' }
 
 describe('dashboard, users and logs', () => {
@@ -104,6 +110,25 @@ describe('dashboard, users and logs', () => {
       },
     })
     expect(clear.json()).toEqual({ code: 'OK', message: 'succ' })
+  })
+
+  it('converts the original JSONP release check into structured data', async () => {
+    const app = await appWith((url) => {
+      expect(url.origin + url.pathname).toBe('https://auth.cccyun.cc/app/dnsmgr.php')
+      expect(url.searchParams.get('ver')).toBe('1051')
+      expect(url.searchParams.get('callback')).toBe('dnsmgrRelease')
+      return new Response('dnsmgrRelease({"code":0,"msg":"<li>当前版本：V2.19 (Build 1051)</li>"})')
+    })
+
+    const response = await app.inject({ method: 'GET', url: '/api/web/v1/dashboard/release' })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().data).toMatchObject({
+      status: 'current',
+      currentBuild: '1051',
+      latestBuild: '1051',
+      latestVersion: '2.19',
+      releaseUrl: 'https://github.com/netcccyun/dnsmgr/releases',
+    })
   })
 
   it('covers user CRUD, permission options and logs without leaking credential internals', async () => {
@@ -498,6 +523,53 @@ describe('public compatibility surface', () => {
     expect(cron.body).toBe('success!')
     expect(monitoring.body).toBe('ok')
     expect(optimize.body).toBe('error')
+  })
+
+  it('preserves domain quick login while CAS protects the management session', async () => {
+    const app = await appWith((url, init) => {
+      if (url.pathname === '/internal/quicklogin') {
+        expect(url.searchParams.get('domain')).toBe('example.com')
+        expect(url.searchParams.get('timestamp')).toBe('1788120000')
+        expect(url.searchParams.get('token')).toBe('one-time-token')
+        expect(url.searchParams.get('sign')).toBe('0123456789abcdef0123456789abcdef')
+        expect(new Headers(init.headers).get('x-requested-with')).toBeNull()
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: '/record/42',
+            'set-cookie': 'user_token=domain-session; Path=/; HttpOnly',
+          },
+        })
+      }
+      if (url.pathname === '/internal/' && init.method === 'GET') {
+        expect(new Headers(init.headers).get('cookie')).toBe('user_token=domain-session')
+        return new Response(null, { status: 302, headers: { location: '/record/42' } })
+      }
+      throw new Error(`unexpected request: ${init.method} ${url.pathname}`)
+    }, true)
+
+    const login = await app.inject({
+      method: 'GET',
+      url: '/quicklogin?domain=example.com&timestamp=1788120000&token=one-time-token&sign=0123456789abcdef0123456789abcdef',
+    })
+    expect(login.statusCode).toBe(302)
+    expect(login.headers.location).toBe('/record/42')
+    const cookies = browserCookies(login)
+    expect(cookies).toContain('dnsmgr_helper_session=')
+    expect(cookies).toContain('dnsmgr_helper_legacy_session=domain-session')
+    expect(cookies).toContain('user_token=domain-session')
+
+    const session = await app.inject({
+      method: 'GET',
+      url: '/api/web/v1/session',
+      headers: { cookie: cookies },
+    })
+    expect(session.statusCode).toBe(200)
+    expect(session.json().data).toMatchObject({
+      authenticated: true,
+      user: { name: 'example.com', type: 'domain', domainId: 42 },
+      capabilities: { domains: true, systemSettings: false },
+    })
   })
 
   it('rejects unregistered public paths and malformed identifiers without an upstream request', async () => {

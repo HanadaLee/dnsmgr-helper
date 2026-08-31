@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildApp } from '../src/app.js'
+import { MonitoringTaskMutationSchema } from '../src/adapters/v1051/monitoring.js'
 import { parseConfig } from '../src/config.js'
 import type { FetchLike } from '../src/upstream/client.js'
 
@@ -39,6 +40,30 @@ async function appWith(handler: (url: URL, init: RequestInit) => Response | Prom
 function json(value: unknown) {
   return Response.json(value)
 }
+
+describe('monitoring validation compatibility', () => {
+  const baseTask = {
+    domainId: 42,
+    recordName: 'www',
+    recordId: 'r1',
+    primaryValue: '192.0.2.1',
+    backupValue: null,
+    checkType: 'tcp' as const,
+    checkUrl: null,
+    tcpPort: 80,
+    intervalSeconds: 5,
+    timeoutSeconds: 2,
+    useProxy: false,
+    enableCloudflareProxy: false,
+    remark: null,
+    record: { lineId: '0', lineLabel: '默认', ttl: 600 },
+  }
+
+  it('rejects a zero threshold for every monitoring action because dnsmgr treats it as empty', () => {
+    expect(MonitoringTaskMutationSchema.safeParse({ ...baseTask, action: 'conditional-enable', cycleCount: 0 }).success).toBe(false)
+    expect(MonitoringTaskMutationSchema.safeParse({ ...baseTask, action: 'disable', cycleCount: 0 }).success).toBe(false)
+  })
+})
 
 function html(value: string) {
   return new Response(value, { headers: { 'content-type': 'text/html; charset=utf-8' } })
@@ -257,12 +282,12 @@ describe('typed schedule API', () => {
           id: 5, did: 42, domain: 'example.com', rr: 'www', recordid: 'r1', type: 1, cycle: 1,
           switchtype: 0, switchdate: '1', switchtime: '08:30', value: '192.0.2.9', line: '1', active: 1,
           nexttimestr: '2026-09-07 08:30:00', updatetimestr: '未运行', addtimestr: '2026-08-31 10:00:00',
-          remark: 'weekly', recordinfo: '{"Value":"192.0.2.1","Line":"0","LineName":"默认","TTL":600}',
+          remark: 'weekly', recordinfo: '{"Value":["192.0.2.1","192.0.2.2"],"Line":"0","LineName":"默认","TTL":600}',
         }] })
       }
       if ((url.pathname === '/internal/schedule/stask/add' || url.pathname === '/internal/schedule/stask/edit') && init.method === 'GET') {
         const info = url.pathname.endsWith('/edit')
-          ? '{"id":5,"did":42,"rr":"www","recordid":"r1","type":1,"cycle":1,"switchtype":0,"switchdate":"1","switchtime":"08:30","value":"192.0.2.9","line":"1","active":1,"recordinfo":"{\\"Value\\":\\"192.0.2.1\\",\\"Line\\":\\"0\\",\\"LineName\\":\\"默认\\",\\"TTL\\":600}"}'
+          ? '{"id":5,"did":42,"rr":"www","recordid":"r1","type":1,"cycle":1,"switchtype":0,"switchdate":"1","switchtime":"08:30","value":"192.0.2.9","line":"1","active":1,"recordinfo":"{\\"Value\\":[\\"192.0.2.1\\",\\"192.0.2.2\\"],\\"Line\\":\\"0\\",\\"LineName\\":\\"默认\\",\\"TTL\\":600}"}'
           : 'null'
         return html(`<script>var info = ${info}; var domainList = [{"id":42,"name":"example.com","type":"cloudflare"}];</script>`)
       }
@@ -272,7 +297,7 @@ describe('typed schedule API', () => {
           expect(Object.fromEntries(form)).toEqual({
             did: '42', rr: 'www', recordid: 'r1', type: '1', cycle: '1', switchtype: '0',
             switchdate: '1', switchtime: '08:30', value: '192.0.2.9', line: '1', remark: 'weekly',
-            recordinfo: '{"Value":"192.0.2.1","Line":"0","LineName":"默认","TTL":600}',
+            recordinfo: '{"Value":["192.0.2.1","192.0.2.2"],"Line":"0","LineName":"默认","TTL":600}',
           })
         }
         if (url.pathname.endsWith('/edit')) expect(form.get('id')).toBe('5')
@@ -299,7 +324,10 @@ describe('typed schedule API', () => {
       value: '192.0.2.9',
       lineMode: 'proxied',
       remark: 'weekly',
-      record: { value: '192.0.2.1', lineId: '0', lineLabel: '默认', ttl: 600 },
+      record: {
+        value: '192.0.2.1,192.0.2.2', values: ['192.0.2.1', '192.0.2.2'],
+        lineId: '0', lineLabel: '默认', ttl: 600,
+      },
     }
     const form = await app.inject({ method: 'GET', url: '/api/web/v1/schedules/form', headers })
     const list = await app.inject({ method: 'GET', url: '/api/web/v1/schedules?pageSize=10&execution=recurring', headers })
@@ -312,7 +340,10 @@ describe('typed schedule API', () => {
 
     expect(form.json()).toMatchObject({ code: 'OK', data: { domains: [{ id: 42, name: 'example.com' }] } })
     expect(list.json()).toMatchObject({
-      code: 'OK', data: [{ id: 5, execution: 'recurring', cycle: 'weekly', action: 'update', lineMode: 'proxied' }],
+      code: 'OK', data: [{
+        id: 5, execution: 'recurring', cycle: 'weekly', action: 'update', lineMode: 'proxied',
+        record: { value: '192.0.2.1,192.0.2.2', values: ['192.0.2.1', '192.0.2.2'] },
+      }],
     })
     expect(detail.json()).toMatchObject({ code: 'OK', data: { id: 5, domain: 'example.com' } })
     for (const response of [create, update, status, batch, remove]) {

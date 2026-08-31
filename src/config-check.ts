@@ -8,6 +8,7 @@ process.stdout.write(`${JSON.stringify({
   listen: `${config.server.host}:${config.server.port}`,
   publicUrl: config.server.publicUrl.href,
   upstreamVersion: config.upstream.version,
+  releaseCheckEnabled: config.releaseCheck.enabled,
   casEnabled: config.cas.enabled,
   legacyBridgeCookie: config.legacySso.bridgeCookie,
   databaseEnabled: config.database.enabled,

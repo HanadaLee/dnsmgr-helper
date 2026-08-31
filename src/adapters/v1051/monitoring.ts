@@ -110,10 +110,10 @@ export const MonitoringTaskMutationSchema = z.object({
       context.addIssue({ code: 'custom', path: ['backupValue'], message: '主备记录值不能相同' })
     }
   }
-  if (value.checkType === 'tcp' && value.tcpPort === null) {
+  if (value.action !== 'conditional-enable' && value.checkType === 'tcp' && value.tcpPort === null) {
     context.addIssue({ code: 'custom', path: ['tcpPort'], message: 'TCP 检测必须填写端口' })
   }
-  if (value.checkType === 'http') {
+  if (value.action !== 'conditional-enable' && value.checkType === 'http') {
     try {
       const url = new URL(value.checkUrl ?? '')
       if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('invalid protocol')
@@ -121,7 +121,7 @@ export const MonitoringTaskMutationSchema = z.object({
       context.addIssue({ code: 'custom', path: ['checkUrl'], message: 'HTTP 检测必须填写完整的 HTTP(S) URL' })
     }
   }
-  if (value.checkType !== 'ping' && value.timeoutSeconds > value.intervalSeconds) {
+  if (value.action !== 'conditional-enable' && value.checkType !== 'ping' && value.timeoutSeconds > value.intervalSeconds) {
     context.addIssue({
       code: 'custom',
       path: ['timeoutSeconds'],

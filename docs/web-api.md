@@ -55,6 +55,7 @@
 | `POST` | `/domains/batch-delete` | 批量删除 |
 | `POST` | `/domains/expiry-refresh` | 批量提交到期时间刷新 |
 | `POST` | `/domains/:domainId/refresh-expiry` | 立即刷新一个域名的到期时间 |
+| `GET/PUT` | `/domains/expiry-settings` | 到期提醒天数和五类通知开关 |
 | `GET` | `/domain-categories` | 分类列表 |
 | `POST` | `/domain-categories` | 新增分类 |
 | `PUT` | `/domain-categories/:categoryId` | 完整更新分类 |
@@ -140,6 +141,8 @@
 ```
 
 `action` 还支持 `status`、`delete`、`remark`、`group` 和 `value`，各自只接受对应字段。
+
+单项删除同样提交 `{ "current": { ...当前记录快照... } }`，使原 dnsmgr 能继续写入完整的解析操作日志；helper 不会从客户端接收任意上游字段。
 
 ## 高级解析
 
@@ -438,6 +441,7 @@
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `GET` | `/dashboard` | 总量、监控、优选 IP、证书/部署状态和服务器信息 |
+| `GET` | `/dashboard/release` | 非阻断版本检查；失败时返回 `unavailable` |
 | `POST` | `/dashboard/cache/clear` | 清理原 dnsmgr 缓存 |
 | `GET` | `/users/form` | 用户域名权限选项 |
 | `GET/POST` | `/users` | 脱敏用户列表和新增用户 |
@@ -499,10 +503,11 @@
 - `POST /api/domain`、`POST /api/domain/:id`；
 - `POST /api/record/data/:id` 以及 `add`、`update`、`delete`、`status`、`remark`、`batch`；
 - `POST /api/cert/order`；
+- `GET /quicklogin?domain=...&token=...`；
 - `GET /cron?key=...`；
 - `ANY /dmtask/status`、`ANY /optimizeip/status`（与原 `Route::any` 一致）。
 
-公开 API 同时接受 `application/x-www-form-urlencoded` 和 JSON 对象，再以原表单字段转发 `uid`、`timestamp`、`sign` 及业务参数。签名仍由原 dnsmgr 按 `md5(uid + timestamp + apikey)` 验证，HTTP 状态与原 JSON 正文不转换。helper 只登记上述固定路径，不能用它访问任意原站控制器。
+公开 API 同时接受 `application/x-www-form-urlencoded` 和 JSON 对象，再以原表单字段转发 `uid`、`timestamp`、`sign` 及业务参数。签名仍由原 dnsmgr 按 `md5(uid + timestamp + apikey)` 验证，HTTP 状态与原 JSON 正文不转换。`/quicklogin` 保留原令牌验证与跳转语义，并在成功时同步签发域名受限浏览器会话。helper 只登记上述固定路径，不能用它访问任意原站控制器。
 
 ## 兼容动作入口
 

@@ -5,6 +5,12 @@ import type { DnsmgrClient, RequestContext, UpstreamResult } from '../../upstrea
 
 export const PublicApiIdSchema = z.coerce.number().int().positive()
 export const CronQuerySchema = z.object({ key: z.string().max(255).default('') }).strict()
+export const QuickLoginQuerySchema = z.object({
+  domain: z.string().trim().min(1).max(253),
+  timestamp: z.string().regex(/^\d{1,20}$/),
+  token: z.string().trim().min(1).max(2048),
+  sign: z.string().regex(/^[a-f\d]{32}$/i),
+}).strict()
 
 const UnsafeKeys = new Set(['__proto__', 'constructor', 'prototype'])
 const PublicFormKey = /^[A-Za-z][A-Za-z0-9_]*(?:\[[A-Za-z0-9_]*\])*$/
@@ -58,6 +64,19 @@ export async function forwardCron(
 ): Promise<UpstreamResult> {
   const query = CronQuerySchema.parse(rawQuery)
   return client.get(`/cron?key=${encodeURIComponent(query.key)}`, context)
+}
+
+export async function forwardQuickLogin(
+  client: DnsmgrClient,
+  context: RequestContext,
+  rawQuery: unknown,
+): Promise<{ domain: string; result: UpstreamResult }> {
+  const query = QuickLoginQuerySchema.parse(rawQuery)
+  const search = new URLSearchParams(query)
+  return {
+    domain: query.domain,
+    result: await client.getHtml(`/quicklogin?${search.toString()}`, context),
+  }
 }
 
 export async function forwardWorkerStatus(

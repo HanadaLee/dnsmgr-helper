@@ -11,6 +11,11 @@
     "version": "1051",
     "requestTimeoutMs": 15000
   },
+  "releaseCheck": {
+    "enabled": true,
+    "url": "https://auth.cccyun.cc/app/dnsmgr.php",
+    "requestTimeoutMs": 10000
+  },
   "cas": {
     "enabled": false,
     "baseUrl": "https://cas.example.com/cas/organization/application/",

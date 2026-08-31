@@ -25,7 +25,11 @@ export type CasSessionVerification =
   | { status: 'invalid'; candidateCount: number }
   | { status: 'valid'; candidateCount: number; profile: CasProfile }
 
-export async function createCasSession(profile: CasProfile, config: AppConfig): Promise<string> {
+async function createSignedSession(
+  profile: CasProfile,
+  config: AppConfig,
+  sessionKind: 'cas' | 'domain',
+): Promise<string> {
   const key = sessionKey(config)
   if (!config.cas.enabled || !key) throw new Error('CAS Session 未启用')
 
@@ -35,6 +39,7 @@ export async function createCasSession(profile: CasProfile, config: AppConfig): 
     ...(profile.email ? { email: profile.email } : {}),
     ...(profile.displayName ? { displayName: profile.displayName } : {}),
     ...(profile.avatar ? { avatar: profile.avatar } : {}),
+    sessionKind,
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuer(SESSION_ISSUER)
@@ -44,6 +49,14 @@ export async function createCasSession(profile: CasProfile, config: AppConfig): 
     .setIssuedAt()
     .setExpirationTime(expiresAt)
     .sign(key)
+}
+
+export async function createCasSession(profile: CasProfile, config: AppConfig): Promise<string> {
+  return createSignedSession(profile, config, 'cas')
+}
+
+export async function createDomainSession(domain: string, config: AppConfig): Promise<string> {
+  return createSignedSession({ name: domain, displayName: domain }, config, 'domain')
 }
 
 export async function verifyCasSession(

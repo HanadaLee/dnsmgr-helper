@@ -95,14 +95,16 @@ export function parseRecordSnapshot(value: unknown): DnsRecordSnapshot | undefin
   if (ttl === undefined || ttl < 0) return undefined
   const lineId = stringValue(record.Line) ?? ''
   const lineLabel = stringValue(record.LineName)
-  const rawValue = Array.isArray(record.Value)
-    ? record.Value.map(stringValue).filter((item): item is string => Boolean(item)).join(',')
-    : stringValue(record.Value)
+  const rawValues = Array.isArray(record.Value)
+    ? record.Value.map(stringValue).filter((item): item is string => Boolean(item))
+    : undefined
+  const rawValue = rawValues?.join(',') ?? stringValue(record.Value)
   return {
     lineId,
     ttl,
     ...(lineLabel ? { lineLabel } : {}),
     ...(rawValue ? { value: rawValue } : {}),
+    ...(rawValues?.length ? { values: rawValues } : {}),
   }
 }
 

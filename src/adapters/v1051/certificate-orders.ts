@@ -436,27 +436,33 @@ export async function getCertificateArtifacts(
   context: RequestContext,
   orderId: number,
 ): Promise<CertificateArtifacts> {
-  const result = await executeLegacyOperation(client, config, context, 'certificateOrders.info', {
-    form: { id: orderId },
-  })
-  const data = objectValue(result.data)
-  const id = Number(data?.id)
-  const certificate = typeof data?.crt === 'string' ? data.crt : undefined
-  const privateKey = typeof data?.key === 'string' ? data.key : undefined
+  const [artifactResult, listResult] = await Promise.all([
+    executeLegacyOperation(client, config, context, 'certificateOrders.get', {
+      form: { id: orderId },
+    }),
+    executeLegacyOperation(client, config, context, 'certificateOrders.list', {
+      form: { id: orderId, offset: 0, limit: 1, sortName: 'id', sortOrder: 'desc' },
+    }),
+  ])
+  const data = objectValue(artifactResult.data)
+  const rows = Array.isArray(listResult.data) ? listResult.data : []
+  const row = objectValue(rows[0])
+  if (!row) throw new ApiError(404, 'CERTIFICATE_ORDER_NOT_FOUND', '证书订单不存在')
+  const summary = normalizeCertificateOrder(row)
+  const certificate = typeof data?.fullchain === 'string' ? data.fullchain : undefined
+  const privateKey = typeof data?.privatekey === 'string' ? data.privatekey : undefined
   const pfxBase64 = typeof data?.pfx === 'string' ? data.pfx : undefined
-  if (!Number.isSafeInteger(id) || id <= 0 || !certificate || !privateKey || !pfxBase64) {
+  if (!certificate || !privateKey || !pfxBase64) {
     throw new ApiError(502, 'UPSTREAM_INVALID_CERTIFICATE', '原 dnsmgr 返回了无法识别的证书内容')
   }
-  const issuedAt = stringValue(data?.issuetime)
-  const expiresAt = stringValue(data?.expiretime)
   return {
-    id,
-    domains: stringArray(data?.domains),
+    id: summary.id,
+    domains: summary.domains,
     certificate,
     privateKey,
     pfxBase64,
     pfxPassword: '123456',
-    ...(issuedAt ? { issuedAt } : {}),
-    ...(expiresAt ? { expiresAt } : {}),
+    ...(summary.issuedAt ? { issuedAt: summary.issuedAt } : {}),
+    ...(summary.expiresAt ? { expiresAt: summary.expiresAt } : {}),
   }
 }

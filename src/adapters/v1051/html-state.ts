@@ -86,21 +86,24 @@ const HtmlEntities: Record<string, string> = {
   quot: '"',
 }
 
+export function decodeHtmlText(value: string): string {
+  return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (_match, entity: string) => {
+    if (entity[0] === '#') {
+      const hexadecimal = entity[1]?.toLowerCase() === 'x'
+      const parsed = Number.parseInt(entity.slice(hexadecimal ? 2 : 1), hexadecimal ? 16 : 10)
+      return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0x10ffff
+        ? String.fromCodePoint(parsed)
+        : ''
+    }
+    return HtmlEntities[entity.toLowerCase()] ?? ''
+  })
+}
+
 export function plainText(value: unknown): string | undefined {
   if (typeof value !== 'string' && typeof value !== 'number') return undefined
-  const text = String(value)
+  const text = decodeHtmlText(String(value)
     .replace(/<br\s*\/?\s*>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (_match, entity: string) => {
-      if (entity[0] === '#') {
-        const hexadecimal = entity[1]?.toLowerCase() === 'x'
-        const parsed = Number.parseInt(entity.slice(hexadecimal ? 2 : 1), hexadecimal ? 16 : 10)
-        return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0x10ffff
-          ? String.fromCodePoint(parsed)
-          : ''
-      }
-      return HtmlEntities[entity.toLowerCase()] ?? ''
-    })
+    .replace(/<[^>]*>/g, ''))
     .replace(/[\t ]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
@@ -177,7 +180,7 @@ export function namedTextareaValue(html: string, elementName: string): string | 
     'i',
   ).exec(html)?.[1]
   if (value === undefined) return undefined
-  return plainText(value) ?? ''
+  return decodeHtmlText(value).replace(/\r\n?/g, '\n')
 }
 
 export function tableCellAfterLabel(html: string, label: string): string | undefined {

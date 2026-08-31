@@ -22,16 +22,21 @@ const RecordName = z.string().trim().min(1).max(255)
 const RecordType = z.string().trim().min(1).max(32).transform((value) => value.toUpperCase())
 const RecordValue = z.string().trim().min(1).max(16_384)
 const LineId = z.string().trim().min(1).max(255)
+const ParentId = z.string().trim().min(1).max(1024)
+const RecordMode = z.coerce.number().int().min(1).max(4)
 
 export const RecordSnapshotSchema = z.object({
   id: RecordId,
   name: RecordName,
   type: RecordType,
   value: RecordValue,
+  values: z.array(RecordValue).min(1).max(1000).optional(),
   lineId: LineId,
   ttl: z.coerce.number().int().min(0).max(2_147_483_647).default(600),
   mxPriority: z.coerce.number().int().min(0).max(65_535).default(1),
   weight: z.coerce.number().int().min(0).max(100).default(0),
+  mode: RecordMode.optional(),
+  parentId: ParentId.optional(),
   remark: z.string().trim().max(1000).nullable().optional(),
 }).strict()
 
@@ -43,6 +48,8 @@ export const CreateRecordSchema = z.object({
   ttl: z.coerce.number().int().min(1).max(2_147_483_647).default(600),
   mxPriority: z.coerce.number().int().min(0).max(65_535).default(1),
   weight: z.coerce.number().int().min(0).max(100).default(0),
+  mode: RecordMode.optional(),
+  parentId: ParentId.optional(),
   remark: z.string().trim().max(1000).nullable().optional(),
 }).strict()
 
@@ -52,6 +59,10 @@ export const UpdateRecordSchema = CreateRecordSchema.extend({
 
 export const RecordStatusSchema = z.object({
   enabled: z.boolean(),
+  current: RecordSnapshotSchema.optional(),
+}).strict()
+
+export const DeleteRecordSchema = z.object({
   current: RecordSnapshotSchema.optional(),
 }).strict()
 
@@ -184,11 +195,13 @@ function legacySnapshot(snapshot: z.infer<typeof RecordSnapshotSchema>): LegacyO
     RecordId: snapshot.id,
     Name: snapshot.name,
     Type: snapshot.type,
-    Value: snapshot.value,
+    Value: snapshot.values?.length ? snapshot.values : snapshot.value,
     Line: snapshot.lineId,
     TTL: snapshot.ttl,
     MX: snapshot.mxPriority,
     Weight: snapshot.weight,
+    ...(snapshot.mode === undefined ? {} : { Mode: snapshot.mode }),
+    ...(snapshot.parentId ? { ParentId: snapshot.parentId } : {}),
     Remark: snapshot.remark ?? '',
   }
 }
@@ -202,6 +215,8 @@ function recordMutationForm(body: z.infer<typeof CreateRecordSchema>) {
     ttl: body.ttl,
     mx: body.mxPriority,
     weight: body.weight,
+    ...(body.mode === undefined ? {} : { mode: body.mode }),
+    ...(body.parentId ? { parentid: body.parentId } : {}),
     remark: body.remark ?? '',
   }
 }
@@ -224,7 +239,12 @@ export function recordOptionsFromHtml(html: string): RecordOptions {
 
   const providerType = stringValue(rawConfig.type) ?? 'unknown'
   const redirectRecords = boolValue(rawConfig.redirect)
-  const recordTypes = ['A', 'CNAME', 'AAAA', 'NS', 'MX', 'SRV', 'TXT', 'CAA']
+  // QingCloud uses a dedicated hierarchical editor in dnsmgr and only exposes
+  // this smaller type set there. Advertising the generic types makes the new
+  // UI offer records that the provider adapter cannot create.
+  const recordTypes = providerType === 'qingcloud'
+    ? ['A', 'CNAME', 'AAAA', 'NS', 'MX', 'TXT']
+    : ['A', 'CNAME', 'AAAA', 'NS', 'MX', 'SRV', 'TXT', 'CAA']
   if (redirectRecords) recordTypes.push('REDIRECT_URL', 'FORWARD_URL')
   if (providerType === 'powerdns') recordTypes.push('LOC', 'PTR', 'LUA')
 
@@ -245,6 +265,7 @@ export function recordOptionsFromHtml(html: string): RecordOptions {
       weightedSets: providerType === 'aliyun',
       domainAliases: providerType === 'dnspod',
       customHostnames: providerType === 'cloudflare',
+      hierarchicalRecords: providerType === 'qingcloud',
     },
   }
 }
@@ -301,10 +322,15 @@ export async function deleteRecord(
   context: RequestContext,
   domainId: number,
   recordId: string,
+  rawBody: unknown,
 ) {
+  const body = DeleteRecordSchema.parse(rawBody ?? {})
   const result = await executeLegacyOperation(client, config, context, 'records.delete', {
     path: { domainId },
-    form: { recordid: recordId },
+    form: {
+      recordid: recordId,
+      ...(body.current ? { recordinfo: JSON.stringify(legacySnapshot(body.current)) } : {}),
+    },
   })
   return operationMessage(result.message)
 }
@@ -543,10 +569,9 @@ export type WeightedRecordSet = {
 
 function normalizeWeightedSet(raw: unknown): WeightedRecordSet | undefined {
   const row = objectValue(raw)
-  const id = stringValue(row?.id)
   const subdomain = stringValue(row?.SubDomain)
   const type = stringValue(row?.Type)
-  if (!row || !id || !subdomain || !type) return undefined
+  if (!row || !subdomain || !type) return undefined
   const algorithmsObject = objectValue(row.LineAlgorithms)
   const algorithms = Array.isArray(algorithmsObject?.LineAlgorithm)
     ? algorithmsObject.LineAlgorithm
@@ -558,7 +583,10 @@ function normalizeWeightedSet(raw: unknown): WeightedRecordSet | undefined {
   })
   const count = numberValue(row.RecordCount)
   return {
-    id,
+    // dnsmgr generates row.id from 1 for every provider page. It is only a
+    // Bootstrap-table row handle and therefore collides when the separated UI
+    // loads more than one page. Subdomain + type is the actual set identity.
+    id: `${encodeURIComponent(subdomain)}:${encodeURIComponent(type)}`,
     lookupName: stringValue(row.rr) ?? subdomain,
     subdomain,
     type,
