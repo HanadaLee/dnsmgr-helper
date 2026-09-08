@@ -76,6 +76,10 @@ function safeIcon(value: unknown): string | undefined {
   return icon
 }
 
+function providerLabel(type: string, label: string): string {
+  return type.toLowerCase() === 'cloudflare' ? 'CloudFlare' : label
+}
+
 const UnsafeKeys = new Set(['__proto__', 'constructor', 'prototype'])
 
 type JsonState = { count: number }
@@ -175,7 +179,7 @@ function providerDefinition(type: string, raw: unknown): DnsProviderDefinition |
 
   return {
     type,
-    label,
+    label: providerLabel(type, label),
     ...(icon ? { icon } : {}),
     ...(note ? { note } : {}),
     fields,
@@ -210,7 +214,7 @@ function normalizeAccount(row: LegacyObject): DomainAccountSummary {
   if (!id || !Number.isInteger(id) || id <= 0 || !name || !type) {
     throw new ApiError(502, 'UPSTREAM_INVALID_ACCOUNT', '原 dnsmgr 返回了无法识别的域名账户')
   }
-  const label = plainText(row.typename) ?? type
+  const label = providerLabel(type, plainText(row.typename) ?? type)
   const icon = safeIcon(row.icon)
   const remark = stringValue(row.remark)
   const addedAt = stringValue(row.addtime)

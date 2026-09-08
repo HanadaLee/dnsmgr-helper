@@ -1,0 +1,215 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { buildApp } from '../src/app.js'
+import { parseConfig } from '../src/config.js'
+import type { FetchLike } from '../src/upstream/client.js'
+
+const apps: Awaited<ReturnType<typeof buildApp>>[] = []
+const accountId = 25
+const domainUuid = '1311af83-8647-4541-9521-e2387a411a2f'
+const ruleUuid = 'ad6b9339-58c2-40c5-a8e5-65af8708175c'
+const eipUuid = '36bc8942-cb3d-41c0-8fba-4dcf18f284d7'
+const tagUuid = '2751529a-efd3-40ce-b8e3-9ff31f2dfccc'
+const providerUuid = 'f4042cab-2255-4387-921a-8dce9aa76c11'
+const zoneUuid = 'b92016ed-2ee0-4114-9a2e-383c6fd3e99f'
+
+afterEach(async () => {
+  await Promise.all(apps.splice(0).map((app) => app.close()))
+  vi.restoreAllMocks()
+})
+
+function testConfig() {
+  return parseConfig({
+    server: { environment: 'test', publicUrl: 'https://dns.test/' },
+    upstream: { url: 'http://legacy.test/internal/' },
+    cas: { enabled: false },
+    legacySso: {},
+    database: {},
+  })
+}
+
+function fakeFetch(handler: (url: URL, init: RequestInit) => Response | Promise<Response>): FetchLike {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? new URL(input.url) : new URL(input)
+    return handler(url, init ?? {})
+  }) as FetchLike
+}
+
+async function appWith(handler: (url: URL, init: RequestInit) => Response | Promise<Response>) {
+  const app = await buildApp({ config: testConfig(), fetcher: fakeFetch(handler), logger: false })
+  apps.push(app)
+  return app
+}
+
+function json(value: unknown) {
+  return Response.json(value)
+}
+
+function form(init: RequestInit) {
+  return new URLSearchParams(String(init.body))
+}
+
+const headers = { cookie: 'user_token=legacy-axisnow-session' }
+
+describe('typed AxisNow API', () => {
+  it('normalizes platform accounts, domains, linked options and route rules', async () => {
+    const mutations: string[] = []
+    const app = await appWith((url, init) => {
+      if (url.pathname === '/internal/axisnow/domains' && (init.method ?? 'GET') === 'GET') {
+        return new Response(`<script>var axisnowAccounts = [{"id":${accountId},"name":"生产平台"}];</script>`, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+      }
+      if (url.pathname === '/internal/axisnow/domains/data') {
+        const body = form(init)
+        expect(body.get('account_id')).toBe(String(accountId))
+        return json({ code: 0, total: 1, rows: [{
+          uuid: domainUuid,
+          account_id: accountId,
+          account_name: '生产平台',
+          domain: 'route.example.com',
+          provider_source: 'platform',
+          record_type: 'A',
+          dns_provider_uuid: providerUuid,
+          dns_zone_uuid: zoneUuid,
+          provider_type: 'axisnow',
+          eips_count: 3,
+          dns_rules_count: 1,
+          updated_at: '2026-09-09T01:02:03Z',
+        }] })
+      }
+      if (url.pathname === `/internal/axisnow/options/${accountId}`) {
+        expect(url.searchParams.get('scope')).toBe('rule')
+        expect(url.searchParams.get('domain_uuid')).toBe(domainUuid)
+        return json({ code: 0, data: {
+          eips: [{ uuid: eipUuid, address: '192.0.2.10' }],
+          tags: [{ uuid: tagUuid, name: '中国电信' }],
+          probe_templates: [{ uuid: providerUuid, name: 'HTTP 可用性' }],
+          geo_isp_options: [{ value: 'isp/china-telecom', name: '中国电信', depth: 1, disabled: false }],
+        } })
+      }
+      if (url.pathname === `/internal/axisnow/rules/data/${accountId}/${domainUuid}`) {
+        return json({ code: 0, total: 1, rows: [{
+          uuid: ruleUuid,
+          account_id: accountId,
+          account_name: '生产平台',
+          dns_domain_uuid: domainUuid,
+          type: 'A',
+          geo_isp: 'isp/china-telecom',
+          geo_isp_name: '中国电信',
+          status: 'active',
+          strategy: 'quality_optimized',
+          pool_summary: '1 个 EIP',
+          action: { conf: { address_pool: { groups: [{ type: 'eip', eip_uuids: [eipUuid] }] } } },
+        }] })
+      }
+      if (url.pathname === `/internal/axisnow/rules/get/${accountId}/${ruleUuid}`) {
+        return json({ code: 0, data: {
+          uuid: ruleUuid,
+          dns_domain_uuid: domainUuid,
+          type: 'A',
+          geo_isp: 'isp/china-telecom',
+          status: 'paused',
+          action: { conf: { response_strategy: { election_strategy: 'random', ip_quantity: 1 } } },
+        } })
+      }
+      if (url.pathname === '/internal/axisnow/domains/create') {
+        mutations.push(url.pathname)
+        const body = form(init)
+        expect(Object.fromEntries(body)).toMatchObject({
+          account_id: String(accountId),
+          domain: 'route.example.com',
+          provider_source: 'platform',
+          dns_provider_uuid: providerUuid,
+          dns_zone_uuid: zoneUuid,
+          record_type: 'A',
+        })
+        return json({ code: 0, msg: '调度域名创建成功' })
+      }
+      throw new Error(`unexpected upstream route: ${url.pathname}`)
+    })
+
+    const accounts = await app.inject({ method: 'GET', url: '/api/web/v1/axisnow/accounts', headers })
+    expect(accounts.json()).toEqual({ code: 'OK', data: [{ id: accountId, name: '生产平台' }] })
+
+    const domains = await app.inject({ method: 'GET', url: `/api/web/v1/axisnow/domains?accountId=${accountId}`, headers })
+    expect(domains.json()).toMatchObject({ code: 'OK', meta: { total: 1 }, data: [{ uuid: domainUuid, accountName: '生产平台', providerSource: 'platform', ruleCount: 1 }] })
+
+    const detail = await app.inject({ method: 'GET', url: `/api/web/v1/axisnow/accounts/${accountId}/domains/${domainUuid}`, headers })
+    expect(detail.json()).toMatchObject({ code: 'OK', data: { domain: 'route.example.com', dnsZoneUuid: zoneUuid } })
+
+    const options = await app.inject({ method: 'GET', url: `/api/web/v1/axisnow/accounts/${accountId}/options?scope=rule&domainUuid=${domainUuid}`, headers })
+    expect(options.json()).toMatchObject({ code: 'OK', data: { eips: [{ uuid: eipUuid, name: '192.0.2.10' }], geoIspOptions: [{ name: '中国电信' }] } })
+
+    const rules = await app.inject({ method: 'GET', url: `/api/web/v1/axisnow/accounts/${accountId}/domains/${domainUuid}/rules`, headers })
+    expect(rules.json()).toMatchObject({ code: 'OK', meta: { total: 1 }, data: [{ uuid: ruleUuid, geoIspName: '中国电信', poolSummary: '1 个 EIP' }] })
+
+    const rule = await app.inject({ method: 'GET', url: `/api/web/v1/axisnow/accounts/${accountId}/domains/${domainUuid}/rules/${ruleUuid}`, headers })
+    expect(rule.json()).toMatchObject({ code: 'OK', data: { uuid: ruleUuid, status: 'paused' } })
+
+    const created = await app.inject({ method: 'POST', url: '/api/web/v1/axisnow/domains', headers, payload: {
+      accountId,
+      domain: 'route.example.com',
+      providerSource: 'platform',
+      dnsProviderUuid: providerUuid,
+      dnsZoneUuid: zoneUuid,
+      recordType: 'A',
+    } })
+    expect(created.json()).toEqual({ code: 'OK', message: '调度域名创建成功' })
+    expect(mutations).toEqual(['/internal/axisnow/domains/create'])
+  })
+
+  it('covers shared EIP visibility, tag editing and array mutation forms', async () => {
+    const app = await appWith((url, init) => {
+      if (url.pathname === '/internal/axisnow/eips/data') {
+        return json({ code: 0, total: 1, rows: [{
+          uuid: eipUuid,
+          account_id: accountId,
+          account_name: '生产平台',
+          address: '192.0.2.10',
+          can_manage: false,
+          data_origin: 'subscribed',
+          sharer_tenant_uuid: providerUuid,
+          tag_uuids: [tagUuid],
+          tag_names: ['中国电信'],
+          routing_referenced_count: 2,
+          provider_name: '共享租户',
+          geo: { country_code: 'CN', isp_name: '中国电信' },
+          subscription_status: 'active',
+        }] })
+      }
+      if (url.pathname === '/internal/axisnow/tags/data') {
+        return json({ code: 0, total: 1, rows: [{ uuid: tagUuid, account_id: accountId, account_name: '生产平台', name: '中国电信', bound_count: 4, referenced_count: 2 }] })
+      }
+      if (url.pathname === '/internal/axisnow/tags/edit') {
+        expect(url.searchParams.get('account_id')).toBe(String(accountId))
+        expect(url.searchParams.get('uuid')).toBe(tagUuid)
+        return json({ code: 0, data: { uuid: tagUuid, name: '中国电信', description: '电信地址池' } })
+      }
+      if (url.pathname === '/internal/axisnow/eips/delete') {
+        const body = form(init)
+        expect(body.get('account_id')).toBe(String(accountId))
+        expect(body.getAll('uuids[]')).toEqual([eipUuid])
+        return json({ code: 0, msg: 'EIP 删除成功' })
+      }
+      if (url.pathname === '/internal/axisnow/tags/save') {
+        expect(Object.fromEntries(form(init))).toEqual({ account_id: String(accountId), uuid: tagUuid, name: '中国电信优化', description: '' })
+        return json({ code: 0, msg: '标签修改成功' })
+      }
+      throw new Error(`unexpected upstream route: ${url.pathname}`)
+    })
+
+    const eips = await app.inject({ method: 'GET', url: '/api/web/v1/axisnow/eips', headers })
+    expect(eips.json()).toMatchObject({ code: 'OK', data: [{ dataOrigin: 'subscribed', canManage: false, providerName: '共享租户', referencedCount: 2 }] })
+
+    const tags = await app.inject({ method: 'GET', url: '/api/web/v1/axisnow/tags', headers })
+    expect(tags.json()).toMatchObject({ code: 'OK', data: [{ uuid: tagUuid, boundCount: 4, referencedCount: 2 }] })
+
+    const tag = await app.inject({ method: 'GET', url: `/api/web/v1/axisnow/accounts/${accountId}/tags/${tagUuid}`, headers })
+    expect(tag.json()).toEqual({ code: 'OK', data: { uuid: tagUuid, accountId, accountName: '-', name: '中国电信', description: '电信地址池', boundCount: 0, referencedCount: 0 } })
+
+    const removed = await app.inject({ method: 'POST', url: '/api/web/v1/axisnow/eips/batch-delete', headers, payload: { accountId, uuids: [eipUuid] } })
+    expect(removed.json()).toEqual({ code: 'OK', message: 'EIP 删除成功' })
+
+    const updated = await app.inject({ method: 'PUT', url: `/api/web/v1/axisnow/tags/${tagUuid}`, headers, payload: { accountId, name: '中国电信优化', description: null } })
+    expect(updated.json()).toEqual({ code: 'OK', message: '标签修改成功' })
+  })
+})

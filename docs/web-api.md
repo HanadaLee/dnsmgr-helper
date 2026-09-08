@@ -355,7 +355,7 @@
 
 批量更换证书使用 `{ "ids": [11, 12], "action": "assign-certificate", "orderId": 10 }`；其他批量动作是 `delete`、`reset`、`enable`、`disable`。
 
-### CNAME 代理与计划设置
+### DCV 托管校验与计划设置
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -381,7 +381,30 @@
 
 通知模式支持 `off`、`all`、`failures-only`。helper 只会写入证书续签、部署时段和五个通知键，不接受任意系统设置名称。
 
-## Cloudflare
+## AxisNow 调度管理
+
+AxisNow 接口按平台账户隔离，helper 只访问原 dnsmgr 已登记的控制器，不直接持有或调用 AxisNow API 令牌。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/axisnow/accounts` | 可用 AxisNow 平台账户 |
+| `GET/POST` | `/axisnow/domains` | DNS 路由域名列表和新增 |
+| `GET/DELETE` | `/axisnow/accounts/:accountId/domains/:uuid` | 域名详情和删除 |
+| `PUT` | `/axisnow/domains/:uuid` | 修改域名；账户与托管类型保持不变 |
+| `GET` | `/axisnow/accounts/:accountId/options?scope=domain|eip|rule` | 托管后缀、DNS 提供商、EIP、标签、线路和监控模板 |
+| `GET/POST` | `/axisnow/accounts/:accountId/domains/:domainUuid/rules` | 路由规则列表和新增 |
+| `GET/PUT/DELETE` | `/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid` | 路由规则详情、修改和删除 |
+| `PATCH` | `/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid/status` | 启用或暂停路由规则 |
+| `GET/POST` | `/axisnow/eips` | 自有及共享订阅 EIP 列表和新增 |
+| `PUT` | `/axisnow/eips/:uuid` | 修改可管理 EIP |
+| `POST` | `/axisnow/eips/batch-delete` | 按平台账户批量删除 EIP |
+| `GET/POST` | `/axisnow/tags` | 标签列表和新增 |
+| `GET/DELETE` | `/axisnow/accounts/:accountId/tags/:uuid` | 标签编辑详情和删除 |
+| `PUT` | `/axisnow/tags/:uuid` | 修改标签 |
+
+AxisNow 托管域名提交 `providerSource: "platform"`、所选 `dnsProviderUuid` 与 `dnsZoneUuid`；前端只允许填写前缀并从后缀列表选择。自托管提交 `providerSource: "self-hosted"` 和联动的 DNS 提供商 UUID。EIP 列表的 `dataOrigin` 区分 `own` 与 `subscribed`，共享订阅项会返回 `canManage: false` 和 `providerName`，前端不会允许编辑或删除。
+
+## CloudFlare
 
 ### 自定义主机名
 
@@ -413,7 +436,7 @@
 
 验证记录写入流程使用稳定接口组合：先调用 `txt-targets`，再调用目标域名的 `record-options` 或 `default-line`，最后使用 `/domains/:domainId/records` 创建 TXT/CNAME。CF 优选解析复用 `/optimize-ip/tasks` 和记录查询/写入接口，不依赖通用动作入口。
 
-### Cloudflare Tunnel
+### CloudFlare Tunnel
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |

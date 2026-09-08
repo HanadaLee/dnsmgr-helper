@@ -61,12 +61,12 @@ function normalizeCertificateCname(row: LegacyObject): CertificateCnameProxy {
   const id = requiredPositiveInteger(
     row.id,
     'UPSTREAM_INVALID_CERTIFICATE_CNAME',
-    '原 dnsmgr 返回了无法识别的 CNAME 代理',
+    '原 dnsmgr 返回了无法识别的 DCV 托管校验记录',
   )
   const targetDomainId = requiredPositiveInteger(
     row.did,
     'UPSTREAM_INVALID_CERTIFICATE_CNAME',
-    '原 dnsmgr 返回了无法识别的 CNAME 代理',
+    '原 dnsmgr 返回了无法识别的 DCV 托管校验记录',
   )
   const domain = stringValue(row.domain)
   const challengeHost = stringValue(row.host)
@@ -74,7 +74,7 @@ function normalizeCertificateCname(row: LegacyObject): CertificateCnameProxy {
   const targetRecordName = stringValue(row.rr)
   const target = stringValue(row.record)
   if (!domain || !challengeHost || !targetDomain || !targetRecordName || !target) {
-    throw new ApiError(502, 'UPSTREAM_INVALID_CERTIFICATE_CNAME', '原 dnsmgr 返回了无法识别的 CNAME 代理')
+    throw new ApiError(502, 'UPSTREAM_INVALID_CERTIFICATE_CNAME', '原 dnsmgr 返回了无法识别的 DCV 托管校验记录')
   }
   const addedAt = stringValue(row.addtime)
   return {
@@ -124,7 +124,7 @@ export async function listCertificateCnames(
     result,
     query.page,
     query.pageSize,
-    '原 dnsmgr 的 CNAME 代理列表格式不兼容',
+    '原 dnsmgr 的 DCV 托管校验列表格式不兼容',
     normalizeCertificateCname,
   )
 }

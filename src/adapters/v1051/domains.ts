@@ -126,7 +126,9 @@ function normalizeDomain(row: LegacyRow): DomainSummary {
   }
 
   const providerType = optionalString(row.type) ?? 'unknown'
-  const providerLabel = optionalString(row.typename) ?? providerType
+  const providerLabel = providerType.toLowerCase() === 'cloudflare'
+    ? 'CloudFlare'
+    : optionalString(row.typename) ?? providerType
   const accountId = numberValue(row.aid)
   const accountLabel = optionalString(row.aremark)
   const checkStatus = numberValue(row.checkstatus)

@@ -22,6 +22,30 @@ import {
   updateCertificateAccount,
 } from './adapters/v1051/certificate-accounts.js'
 import {
+  createAxisNowDomain,
+  createAxisNowEips,
+  createAxisNowRule,
+  createAxisNowTag,
+  deleteAxisNowDomain,
+  deleteAxisNowEips,
+  deleteAxisNowRule,
+  deleteAxisNowTag,
+  getAxisNowDomain,
+  getAxisNowOptions,
+  getAxisNowRule,
+  getAxisNowTag,
+  listAxisNowAccounts,
+  listAxisNowDomains,
+  listAxisNowEips,
+  listAxisNowRules,
+  listAxisNowTags,
+  setAxisNowRuleStatus,
+  updateAxisNowDomain,
+  updateAxisNowEip,
+  updateAxisNowRule,
+  updateAxisNowTag,
+} from './adapters/v1051/axisnow.js'
+import {
   checkCertificateCname,
   createCertificateCname,
   deleteCertificateCname,
@@ -277,6 +301,22 @@ const CloudflareTunnelIdParamsSchema = z.object({
   accountId: z.coerce.number().int().positive(),
   tunnelId: z.string().trim().min(1).max(128),
 })
+const AxisNowUuidParamsSchema = z.object({
+  uuid: z.string().trim().min(1).max(64),
+})
+const AxisNowAccountUuidParamsSchema = z.object({
+  accountId: z.coerce.number().int().positive(),
+  uuid: z.string().trim().min(1).max(64),
+})
+const AxisNowDomainRuleParamsSchema = z.object({
+  accountId: z.coerce.number().int().positive(),
+  domainUuid: z.string().trim().min(1).max(64),
+})
+const AxisNowRuleParamsSchema = z.object({
+  accountId: z.coerce.number().int().positive(),
+  domainUuid: z.string().trim().min(1).max(64),
+  ruleUuid: z.string().trim().min(1).max(64),
+})
 
 function redirect(reply: FastifyReply, location: string) {
   return reply.code(302).header('location', location).send()
@@ -431,6 +471,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         optimizeIpTyped: true,
         certificatesTyped: true,
         cloudflareTyped: true,
+        axisNowTyped: true,
         administrationTyped: true,
         publicApiCompatible: true,
         quickLoginCompatible: true,
@@ -1651,6 +1692,164 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     code: 'OK',
     ...await updateCertificateSettings(client, config, upstreamContext(request, config), request.body),
   }))
+
+  app.get('/api/web/v1/axisnow/accounts', async (request) => ({
+    code: 'OK',
+    data: await listAxisNowAccounts(client, config, upstreamContext(request, config)),
+  }))
+
+  app.get('/api/web/v1/axisnow/domains', async (request) => {
+    const result = await listAxisNowDomains(client, config, upstreamContext(request, config), request.query)
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/axisnow/domains', async (request) => ({
+    code: 'OK',
+    ...await createAxisNowDomain(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/axisnow/accounts/:accountId/domains/:uuid', async (request) => {
+    const params = AxisNowAccountUuidParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getAxisNowDomain(client, config, upstreamContext(request, config), params.accountId, params.uuid),
+    }
+  })
+
+  app.put('/api/web/v1/axisnow/domains/:uuid', async (request) => {
+    const params = AxisNowUuidParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateAxisNowDomain(client, config, upstreamContext(request, config), params.uuid, request.body),
+    }
+  })
+
+  app.delete('/api/web/v1/axisnow/accounts/:accountId/domains/:uuid', async (request) => {
+    const params = AxisNowAccountUuidParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteAxisNowDomain(client, config, upstreamContext(request, config), params.accountId, params.uuid),
+    }
+  })
+
+  app.get('/api/web/v1/axisnow/accounts/:accountId/options', async (request) => {
+    const params = AccountIdParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getAxisNowOptions(client, config, upstreamContext(request, config), params.accountId, request.query),
+    }
+  })
+
+  app.get('/api/web/v1/axisnow/accounts/:accountId/domains/:domainUuid/rules', async (request) => {
+    const params = AxisNowDomainRuleParamsSchema.parse(request.params)
+    const result = await listAxisNowRules(client, config, upstreamContext(request, config), params.accountId, params.domainUuid, request.query)
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/axisnow/accounts/:accountId/domains/:domainUuid/rules', async (request) => {
+    const params = AxisNowDomainRuleParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await createAxisNowRule(client, config, upstreamContext(request, config), {
+        ...(request.body && typeof request.body === 'object' ? request.body : {}),
+        accountId: params.accountId,
+        domainUuid: params.domainUuid,
+      }),
+    }
+  })
+
+  app.get('/api/web/v1/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid', async (request) => {
+    const params = AxisNowRuleParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getAxisNowRule(client, config, upstreamContext(request, config), params.accountId, params.ruleUuid),
+    }
+  })
+
+  app.put('/api/web/v1/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid', async (request) => {
+    const params = AxisNowRuleParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateAxisNowRule(client, config, upstreamContext(request, config), params.ruleUuid, {
+        ...(request.body && typeof request.body === 'object' ? request.body : {}),
+        accountId: params.accountId,
+        domainUuid: params.domainUuid,
+      }),
+    }
+  })
+
+  app.patch('/api/web/v1/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid/status', async (request) => {
+    const params = AxisNowRuleParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await setAxisNowRuleStatus(client, config, upstreamContext(request, config), params.accountId, params.ruleUuid, request.body),
+    }
+  })
+
+  app.delete('/api/web/v1/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid', async (request) => {
+    const params = AxisNowRuleParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteAxisNowRule(client, config, upstreamContext(request, config), params.accountId, params.ruleUuid),
+    }
+  })
+
+  app.get('/api/web/v1/axisnow/eips', async (request) => {
+    const result = await listAxisNowEips(client, config, upstreamContext(request, config), request.query)
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/axisnow/eips', async (request) => ({
+    code: 'OK',
+    ...await createAxisNowEips(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.put('/api/web/v1/axisnow/eips/:uuid', async (request) => {
+    const params = AxisNowUuidParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateAxisNowEip(client, config, upstreamContext(request, config), params.uuid, request.body),
+    }
+  })
+
+  app.post('/api/web/v1/axisnow/eips/batch-delete', async (request) => ({
+    code: 'OK',
+    ...await deleteAxisNowEips(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/axisnow/tags', async (request) => {
+    const result = await listAxisNowTags(client, config, upstreamContext(request, config), request.query)
+    return { code: 'OK', ...result }
+  })
+
+  app.post('/api/web/v1/axisnow/tags', async (request) => ({
+    code: 'OK',
+    ...await createAxisNowTag(client, config, upstreamContext(request, config), request.body),
+  }))
+
+  app.get('/api/web/v1/axisnow/accounts/:accountId/tags/:uuid', async (request) => {
+    const params = AxisNowAccountUuidParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getAxisNowTag(client, config, upstreamContext(request, config), params.accountId, params.uuid),
+    }
+  })
+
+  app.put('/api/web/v1/axisnow/tags/:uuid', async (request) => {
+    const params = AxisNowUuidParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await updateAxisNowTag(client, config, upstreamContext(request, config), params.uuid, request.body),
+    }
+  })
+
+  app.delete('/api/web/v1/axisnow/accounts/:accountId/tags/:uuid', async (request) => {
+    const params = AxisNowAccountUuidParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await deleteAxisNowTag(client, config, upstreamContext(request, config), params.accountId, params.uuid),
+    }
+  })
 
   app.get('/api/web/v1/cloudflare/domains/:domainId/custom-hostnames', async (request) => {
     const params = DomainIdParamsSchema.parse(request.params)

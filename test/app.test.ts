@@ -543,7 +543,7 @@ describe('v1051 list translation', () => {
       data: [{
         id: 42,
         name: 'example.com',
-        provider: { type: 'cloudflare', label: 'Cloudflare', accountId: 7, accountLabel: '主账号' },
+        provider: { type: 'cloudflare', label: 'CloudFlare', accountId: 7, accountLabel: '主账号' },
         recordCount: 18,
         addedAt: '2025-02-03 04:05:06',
         registeredAt: '2024-01-02 03:04:05',
@@ -800,7 +800,7 @@ describe('typed domain management API', () => {
       code: 'OK',
       data: [{
         id: 7,
-        provider: { type: 'cloudflare', label: 'Cloudflare', icon: 'cloudflare.ico' },
+        provider: { type: 'cloudflare', label: 'CloudFlare', icon: 'cloudflare.ico' },
         name: 'admin@example.test',
         remark: '生产',
         addedAt: '2026-08-31 12:00:00',

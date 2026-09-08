@@ -90,7 +90,7 @@ describe('v1051 embedded page state', () => {
     const providers = providerDefinitionsFromHtml(accountHtml())
     expect(providers).toEqual([{
       type: 'cloudflare',
-      label: 'Cloudflare',
+      label: 'CloudFlare',
       icon: 'cloudflare.ico',
       note: '提示：使用 API Token',
       fields: [
@@ -149,7 +149,7 @@ describe('v1051 embedded page state', () => {
   it('returns account secrets only from the privileged detail form, not the list normalizer', () => {
     expect(domainAccountDetailFromHtml(accountHtml())).toEqual({
       id: 7,
-      provider: { type: 'cloudflare', label: 'Cloudflare', icon: 'cloudflare.ico' },
+      provider: { type: 'cloudflare', label: 'CloudFlare', icon: 'cloudflare.ico' },
       name: 'admin@example.test',
       remark: '生产',
       addedAt: '2026-08-31 12:00:00',
