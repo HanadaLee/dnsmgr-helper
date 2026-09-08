@@ -168,7 +168,7 @@ helper 访问原 dnsmgr 时会分别输出 `dnsmgr upstream request` 和 `dnsmgr
 - dnsmgr 发布为 `registry.hanada.info/hanada/dnsmgr:${DNSMGR_VERSION}` 和 `latest`；
 - 只在 `main` 或 `ext` 分支发布镜像，其他分支和合并请求只执行验证。
 
-GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变量。helper 发布版本读取根目录 `VERSION`，并由 Docker 构建检查它与 `package.json` 的 `version` 完全一致；dnsmgr 发布版本读取 `docker/dnsmgr/VERSION`。原 `dnsmgr-docker` 的 Dockerfile、入口脚本及运行配置现由 `docker/dnsmgr/` 维护。
+GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变量。helper 发布版本读取根目录 `VERSION`，并由 Docker 构建检查它与 `package.json` 的 `version` 完全一致；dnsmgr 发布版本读取 `docker/dnsmgr/VERSION`。原 `dnsmgr-docker` 的 Dockerfile、入口脚本及运行配置现由 `docker/dnsmgr/` 维护，默认从 `HanadaLee/dnsmgr` 的 `ext` 分支构建，也可以通过 `DNSMGR_REPOSITORY` 和 `DNSMGR_REF` 构建参数覆盖源码仓库及分支。
 
 本地构建 dnsmgr 镜像使用：
 

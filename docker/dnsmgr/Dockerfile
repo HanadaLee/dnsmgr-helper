@@ -1,15 +1,20 @@
 # syntax=docker/dockerfile:1.7
 
 ARG ALPINE_VERSION="3.19"
-ARG DNSMGR_VERSION="2.19.0.1"
+ARG DNSMGR_VERSION="2.19.0.2"
+ARG DNSMGR_REPOSITORY="HanadaLee/dnsmgr"
+ARG DNSMGR_REF="ext"
 
 FROM alpine:${ALPINE_VERSION}
 
 ARG DNSMGR_VERSION
+ARG DNSMGR_REPOSITORY
+ARG DNSMGR_REF
 
 LABEL org.opencontainers.image.title="dnsmgr" \
       org.opencontainers.image.description="Docker image for dnsmgr" \
-      org.opencontainers.image.version="${DNSMGR_VERSION}"
+      org.opencontainers.image.version="${DNSMGR_VERSION}" \
+      org.opencontainers.image.source="https://github.com/${DNSMGR_REPOSITORY}/tree/${DNSMGR_REF}"
 
 WORKDIR /app/www
 
@@ -66,9 +71,9 @@ COPY config/run_tasks.sh /app/run_tasks.sh
 
 # Application
 RUN mkdir -p /usr/src \
-    && wget --no-cache https://github.com/netcccyun/dnsmgr/archive/refs/heads/main.zip -O /usr/src/www.zip \
+    && wget --no-cache "https://github.com/${DNSMGR_REPOSITORY}/archive/refs/heads/${DNSMGR_REF}.zip" -O /usr/src/www.zip \
     && unzip /usr/src/www.zip -d /usr/src/ \
-    && mv /usr/src/dnsmgr-main /usr/src/www \
+    && mv "/usr/src/dnsmgr-${DNSMGR_REF}" /usr/src/www \
     && rm -f /usr/src/www.zip \
     && wget https://getcomposer.org/download/latest-stable/composer.phar -O /usr/local/bin/composer \
     && chmod +x /usr/local/bin/composer \
