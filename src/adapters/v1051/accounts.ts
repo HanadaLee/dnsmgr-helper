@@ -7,11 +7,11 @@ import type {
   DomainAccountSummary,
   PageMeta,
   ProviderField,
-  ProviderFieldOption,
 } from '../../contracts.js'
 import { ApiError } from '../../errors.js'
 import type { DnsmgrClient, RequestContext } from '../../upstream/client.js'
 import { requireUpstreamHtml } from '../../upstream/legacy.js'
+import { normalizeFieldOptions } from './dynamic-fields.js'
 import { embeddedJsonAssignment, plainText } from './html-state.js'
 import { executeLegacyOperation } from './operations.js'
 
@@ -120,26 +120,6 @@ function sensitiveField(key: string, label: string): boolean {
     || /(^|[_\s-])(api[_\s-]?key|sk)([_\s-]|$)/.test(name)
 }
 
-function fieldOptions(value: unknown): ProviderFieldOption[] | undefined {
-  if (Array.isArray(value)) {
-    const options = value.flatMap((option): ProviderFieldOption[] => {
-      const object = objectValue(option)
-      if (!object) return []
-      const optionValue = stringValue(object.value)
-      const label = plainText(object.label)
-      return optionValue === undefined || !label ? [] : [{ value: optionValue, label }]
-    })
-    return options.length ? options : undefined
-  }
-  const object = objectValue(value)
-  if (!object) return undefined
-  const options = Object.entries(object).flatMap(([optionValue, optionLabel]): ProviderFieldOption[] => {
-    const label = plainText(optionLabel)
-    return label ? [{ value: optionValue, label }] : []
-  })
-  return options.length ? options : undefined
-}
-
 function providerField(key: string, raw: unknown): ProviderField | undefined {
   const field = objectValue(raw)
   if (!field || UnsafeKeys.has(key) || !key || key.length > 255) return undefined
@@ -153,7 +133,7 @@ function providerField(key: string, raw: unknown): ProviderField | undefined {
   const validator = stringValue(field.validator)
   const min = numberValue(field.min)
   const max = numberValue(field.max)
-  const options = fieldOptions(field.options)
+  const options = normalizeFieldOptions(field.options)
   let defaultValue: unknown
   if (Object.hasOwn(field, 'value')) {
     try {

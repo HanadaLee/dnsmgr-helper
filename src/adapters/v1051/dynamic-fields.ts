@@ -68,14 +68,17 @@ function sensitiveField(key: string, label: string): boolean {
     || /(^|[_\s-])(api[_\s-]?key|sk)([_\s-]|$)/.test(name)
 }
 
-function fieldOptions(value: unknown): ProviderFieldOption[] | undefined {
+export function normalizeFieldOptions(value: unknown): ProviderFieldOption[] | undefined {
   if (Array.isArray(value)) {
-    const options = value.flatMap((option): ProviderFieldOption[] => {
+    const options = value.flatMap((option, index): ProviderFieldOption[] => {
       const object = objectValue(option)
-      if (!object) return []
-      const optionValue = stringValue(object.value)
-      const label = plainText(object.label)
-      return optionValue === undefined || !label ? [] : [{ value: optionValue, label }]
+      if (object) {
+        const optionValue = stringValue(object.value)
+        const label = plainText(object.label)
+        return optionValue === undefined || !label ? [] : [{ value: optionValue, label }]
+      }
+      const label = plainText(option)
+      return label ? [{ value: String(index), label }] : []
     })
     return options.length ? options : undefined
   }
@@ -124,7 +127,7 @@ export function normalizeDynamicField(key: string, raw: unknown): ProviderField 
   const validator = stringValue(field.validator)
   const min = numberValue(field.min)
   const max = numberValue(field.max)
-  const options = fieldOptions(field.options)
+  const options = normalizeFieldOptions(field.options)
   const visibleWhen = visibility(field.show)
   let defaultValue: unknown
   if (Object.hasOwn(field, 'value')) {

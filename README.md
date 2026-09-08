@@ -147,7 +147,7 @@ docker compose ps
 也可以在本地构建后指定镜像：
 
 ```powershell
-docker build --build-arg APP_VERSION=0.8.1 -t dnsmgr-helper:local .
+docker build --build-arg APP_VERSION=0.8.2 -t dnsmgr-helper:local .
 $env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
 docker compose up -d
 ```

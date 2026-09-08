@@ -29,10 +29,16 @@ const providerState = {
         placeholder: 'token',
         required: true,
       },
+      auth: {
+        name: '认证方式',
+        type: 'radio',
+        options: ['API密钥', 'API令牌'],
+        value: '0',
+      },
       proxy: {
         name: '使用代理服务器',
         type: 'radio',
-        options: { 0: '否', 1: '是' },
+        options: ['否', '是'],
         value: '0',
       },
     },
@@ -97,6 +103,11 @@ describe('v1051 embedded page state', () => {
           disabled: false, sensitive: true, placeholder: 'token',
         },
         {
+          key: 'auth', label: '认证方式', control: 'radio', required: false,
+          disabled: false, sensitive: false, defaultValue: '0',
+          options: [{ value: '0', label: 'API密钥' }, { value: '1', label: 'API令牌' }],
+        },
+        {
           key: 'proxy', label: '使用代理服务器', control: 'radio', required: false,
           disabled: false, sensitive: false, defaultValue: '0',
           options: [{ value: '0', label: '否' }, { value: '1', label: '是' }],
@@ -108,6 +119,31 @@ describe('v1051 embedded page state', () => {
         domainCreation: false, recordSorting: false,
       },
     }])
+  })
+
+  it('keeps newly added DNS account providers discoverable without a helper allowlist', () => {
+    const html = `<script>var typeList = ${JSON.stringify({
+      technitium: {
+        name: 'Technitium',
+        config: { proxy: { name: '使用代理服务器', type: 'radio', options: ['否', '是'], value: '0' } },
+      },
+      henet: {
+        name: 'HE DNS',
+        config: { proxy: { name: '使用代理服务器', type: 'radio', options: ['否', '是'], value: '0' } },
+      },
+      goedge: {
+        name: 'GoEdge智能DNS',
+        config: { proxy: { name: '使用代理服务器', type: 'radio', options: ['否', '是'], value: '0' } },
+      },
+    })};</script>`
+
+    const providers = providerDefinitionsFromHtml(html)
+    expect(providers.map(({ type, label }) => ({ type, label }))).toEqual([
+      { type: 'technitium', label: 'Technitium' },
+      { type: 'henet', label: 'HE DNS' },
+      { type: 'goedge', label: 'GoEdge智能DNS' },
+    ])
+    expect(providers.every((provider) => provider.fields[0]?.options?.length === 2)).toBe(true)
   })
 
   it('returns account secrets only from the privileged detail form, not the list normalizer', () => {

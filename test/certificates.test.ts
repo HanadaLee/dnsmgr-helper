@@ -51,6 +51,54 @@ function form(init: RequestInit) {
 const headers = { cookie: 'user_token=legacy-certificate-session' }
 
 describe('typed certificate API', () => {
+  it('discovers the AxisNow deployment account definition and its numeric options', async () => {
+    const app = await appWith((url, init) => {
+      if (url.pathname === '/internal/cert/account/add' && init.method === 'GET') {
+        expect(url.searchParams.get('deploy')).toBe('1')
+        return html(`<script>
+          var info = null;
+          var typeList = {
+            "axisnow": {
+              "name":"AxisNow", "class":2, "icon":"axisnow.png",
+              "desc":"支持上传证书到AxisNow平台", "note":"支持上传证书到AxisNow平台",
+              "inputs": {
+                "name":{"name":"租户名","type":"input","required":true},
+                "token":{"name":"API 令牌","type":"input","required":true},
+                "proxy":{"name":"使用代理服务器","type":"radio","options":["否","是"],"value":"0"}
+              },
+              "taskinputs": []
+            }
+          };
+          var classList = {"1":"自建系统","2":"云服务商","3":"服务器"};
+        </script>`)
+      }
+      throw new Error(`unexpected request: ${init.method} ${url.pathname}`)
+    })
+
+    const response = await app.inject({
+      method: 'GET', url: '/api/web/v1/certificate-account-types?kind=deployment', headers,
+    })
+
+    expect(response.json()).toEqual({
+      code: 'OK',
+      data: [{
+        type: 'axisnow', kind: 'deployment', label: 'AxisNow',
+        category: { id: '2', label: '云服务商' }, icon: 'axisnow.png',
+        description: '支持上传证书到AxisNow平台', note: '支持上传证书到AxisNow平台',
+        fields: [
+          { key: 'name', label: '租户名', control: 'input', required: true, disabled: false, sensitive: false },
+          { key: 'token', label: 'API 令牌', control: 'input', required: true, disabled: false, sensitive: true },
+          {
+            key: 'proxy', label: '使用代理服务器', control: 'radio', required: false,
+            disabled: false, sensitive: false, defaultValue: '0',
+            options: [{ value: '0', label: '否' }, { value: '1', label: '是' }],
+          },
+        ],
+        taskFields: [],
+      }],
+    })
+  })
+
   it('normalizes account definitions without exposing list credentials and translates all account mutations', async () => {
     const typeState = `<script>
       var info = null;
