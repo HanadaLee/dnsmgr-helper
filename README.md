@@ -160,14 +160,21 @@ helper 访问原 dnsmgr 时会分别输出 `dnsmgr upstream request` 和 `dnsmgr
 
 ## GitLab CI 镜像发布
 
-`.gitlab-ci.yml` 沿用 CPA-Helper 的发布方式：
+`.gitlab-ci.yml` 沿用 CPA-Helper 的发布方式，并已接管原 `dnsmgr-docker` 项目的构建职责：
 
 - 在 `debian-x86_64` Runner 上执行示例配置校验、类型检查、测试和构建；
-- 分别在 `debian-x86_64`、`debian-aarch64` Runner 上构建并推送架构镜像；
-- 合并为 `${VERSION}` 和 `latest` 两个多架构 Harbor manifest；
+- 分别在 `debian-x86_64`、`debian-aarch64` Runner 上构建并推送 helper 和 dnsmgr 架构镜像；
+- helper 发布为 `registry.hanada.info/hanada/dnsmgr-helper:${VERSION}` 和 `latest`；
+- dnsmgr 发布为 `registry.hanada.info/hanada/dnsmgr:${DNSMGR_VERSION}` 和 `latest`；
 - 只在 `main` 或 `ext` 分支发布镜像，其他分支和合并请求只执行验证。
 
-GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变量。发布版本读取根目录 `VERSION`，并由 Docker 构建检查它与 `package.json` 的 `version` 完全一致。
+GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变量。helper 发布版本读取根目录 `VERSION`，并由 Docker 构建检查它与 `package.json` 的 `version` 完全一致；dnsmgr 发布版本读取 `docker/dnsmgr/VERSION`。原 `dnsmgr-docker` 的 Dockerfile、入口脚本及运行配置现由 `docker/dnsmgr/` 维护。
+
+本地构建 dnsmgr 镜像使用：
+
+```powershell
+docker build -t dnsmgr:local docker/dnsmgr
+```
 
 ## HTTP 路径
 
