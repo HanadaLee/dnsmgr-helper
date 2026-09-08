@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG ALPINE_VERSION="3.19"
-ARG DNSMGR_VERSION="2.19.0.4"
+ARG DNSMGR_VERSION="2.19.0.5"
 ARG DNSMGR_REPOSITORY="HanadaLee/dnsmgr"
 ARG DNSMGR_REF="ext"
 
