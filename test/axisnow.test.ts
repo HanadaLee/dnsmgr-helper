@@ -100,14 +100,14 @@ describe('typed AxisNow API', () => {
           pool_summary: '1 个 EIP',
           pool_groups: [{ type: 'eip', type_name: 'EIP', count: 1, items: ['192.0.2.10'] }],
           pool_addresses: [
-            { address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false },
-            { address: '192.0.2.11', score: 72.5, status: 'available', quality_filtered: false },
+            { address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false, country_code: 'HK', isp_name: '测试线路', provider_name: '测试提供商', tag_names: ['edge.test'] },
+            { address: '192.0.2.11', score: 72.5, status: 'available', quality_filtered: false, country_code: 'SG', tag_names: [] },
           ],
           pool_address_count: 2,
           pool_truncated: false,
           strategy_quantity: 1,
           strategy_interval: 5,
-          resolved_addresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false }],
+          resolved_addresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false, country_code: 'HK', isp_name: '测试线路', provider_name: '测试提供商', tag_names: ['edge.test'] }],
           updated_at: '2026-09-09T01:02:03Z',
           action: { conf: { address_pool: { groups: [{ type: 'eip', eip_uuids: [eipUuid] }] } } },
         }] })
@@ -161,12 +161,12 @@ describe('typed AxisNow API', () => {
         poolAddressCount: 2,
         poolGroups: [{ type: 'eip', typeName: 'EIP', count: 1, items: ['192.0.2.10'] }],
         poolAddresses: [
-          { address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false },
-          { address: '192.0.2.11', score: 72.5, status: 'available', qualityFiltered: false },
+          { address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false, countryCode: 'HK', ispName: '测试线路', providerName: '测试提供商', tagNames: ['edge.test'] },
+          { address: '192.0.2.11', score: 72.5, status: 'available', qualityFiltered: false, countryCode: 'SG', tagNames: [] },
         ],
         strategyQuantity: 1,
         strategyInterval: 5,
-        resolvedAddresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false }],
+        resolvedAddresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false, countryCode: 'HK', ispName: '测试线路', providerName: '测试提供商', tagNames: ['edge.test'] }],
         updatedAt: '2026-09-09T01:02:03Z',
       }],
     })

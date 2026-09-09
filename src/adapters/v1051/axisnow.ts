@@ -252,11 +252,18 @@ function normalizeRule(value: unknown): AxisNowRule {
       if (!address || !addressValue) return []
       const score = optionalNumberValue(address.score)
       const addressStatus = stringValue(address.status)
+      const countryCode = stringValue(address.country_code)
+      const ispName = stringValue(address.isp_name)
+      const providerName = stringValue(address.provider_name)
       return [{
         address: addressValue,
         ...(score !== undefined ? { score } : {}),
         ...(addressStatus ? { status: addressStatus } : {}),
         qualityFiltered: booleanValue(address.quality_filtered),
+        ...(countryCode ? { countryCode } : {}),
+        ...(ispName ? { ispName } : {}),
+        ...(providerName ? { providerName } : {}),
+        tagNames: stringList(address.tag_names),
       }]
     })
     : []

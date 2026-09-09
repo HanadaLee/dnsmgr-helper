@@ -794,6 +794,10 @@ export type AxisNowRuleResolvedAddress = {
   score?: number
   status?: string
   qualityFiltered: boolean
+  countryCode?: string
+  ispName?: string
+  providerName?: string
+  tagNames: string[]
 }
 
 export type AxisNowRule = {
