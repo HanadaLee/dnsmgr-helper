@@ -811,7 +811,7 @@ describe('typed domain management API', () => {
     expect(response.body).not.toContain('config')
   })
 
-  it('translates account creation into the exact validated legacy JSON config form', async () => {
+  it('derives the legacy account name from the first provider field', async () => {
     const appConfig = config()
     const fetcher = fakeFetch((url, init) => {
       expect(url.pathname).toBe('/internal/account/add')
@@ -832,8 +832,7 @@ describe('typed domain management API', () => {
       headers: { cookie: await authenticatedCookies(appConfig) },
       payload: {
         providerType: 'cloudflare',
-        name: 'admin@example.test',
-        config: { email: 'admin@example.test', api_token: 'secret', proxy: '0' },
+        config: { email: ' admin@example.test ', api_token: 'secret', proxy: '0' },
         remark: '生产',
       },
     })

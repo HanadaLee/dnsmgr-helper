@@ -35,7 +35,6 @@ const JsonObjectSchema = z.record(z.string().min(1).max(255), z.unknown())
 
 export const DomainAccountMutationSchema = z.object({
   providerType: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
-  name: z.string().trim().min(1).max(255),
   config: JsonObjectSchema,
   remark: z.string().trim().max(1000).nullable().optional(),
 }).strict()
@@ -337,12 +336,20 @@ export async function getDomainAccount(
 function accountMutationForm(rawBody: unknown): Record<string, unknown> {
   const body = DomainAccountMutationSchema.parse(rawBody)
   const accountConfig = safeJsonObject(body.config)
-  if (Object.keys(accountConfig).length === 0) {
+  for (const [key, value] of Object.entries(accountConfig)) {
+    if (typeof value === 'string' && value) accountConfig[key] = value.trim()
+  }
+  const firstConfigValue = Object.values(accountConfig)[0]
+  if (firstConfigValue === undefined) {
     throw new ApiError(422, 'VALIDATION_ERROR', '账户配置不能为空')
+  }
+  const name = stringValue(firstConfigValue)
+  if (!name) {
+    throw new ApiError(422, 'VALIDATION_ERROR', '账户首个配置项不能为空')
   }
   return {
     type: body.providerType,
-    name: body.name,
+    name,
     config: JSON.stringify(accountConfig),
     remark: body.remark ?? '',
   }

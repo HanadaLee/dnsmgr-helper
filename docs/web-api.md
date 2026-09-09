@@ -30,7 +30,6 @@
 ```json
 {
   "providerType": "cloudflare",
-  "name": "admin@example.com",
   "config": {
     "email": "admin@example.com",
     "api_token": "replace-me",
@@ -39,6 +38,8 @@
   "remark": "生产账户"
 }
 ```
+
+域名账户不单独提交账户名称。helper 与原版 dnsmgr 的表单行为一致，使用供应商配置中的第一个字段作为内部账户标识（例如阿里云使用 `AccessKeyId`，AxisNow 使用租户名）；列表展示时仍可优先使用备注。
 
 ## 域名与分类
 
