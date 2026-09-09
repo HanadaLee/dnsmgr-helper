@@ -35,9 +35,8 @@ const ListQuerySchema = z.object({
 const NullableText = z.string().trim().max(255).nullable().optional()
 const AccountId = z.coerce.number().int().positive()
 
-export const AxisNowDomainMutationSchema = z.object({
+const AxisNowDomainFields = {
   accountId: AccountId,
-  domain: z.string().trim().min(1).max(253),
   providerSource: z.enum(['platform', 'self-hosted']),
   dnsProviderUuid: UuidSchema,
   dnsZoneUuid: UuidSchema.nullable().optional(),
@@ -46,7 +45,14 @@ export const AxisNowDomainMutationSchema = z.object({
   description: NullableText,
   shareDefault: z.boolean().optional(),
   exposeEips: z.boolean().optional(),
+}
+
+export const AxisNowDomainMutationSchema = z.object({
+  ...AxisNowDomainFields,
+  domain: z.string().trim().min(1).max(253),
 }).strict()
+
+export const AxisNowDomainUpdateMutationSchema = z.object(AxisNowDomainFields).strict()
 
 export const AxisNowRuleMutationSchema = z.object({
   accountId: AccountId,
@@ -438,11 +444,10 @@ export async function getAxisNowDomain(
   throw new ApiError(404, 'AXISNOW_DOMAIN_NOT_FOUND', 'AxisNow 调度域名不存在')
 }
 
-function domainForm(rawBody: unknown) {
-  const body = AxisNowDomainMutationSchema.parse(rawBody)
+function domainForm(body: z.infer<typeof AxisNowDomainUpdateMutationSchema>, domain: string) {
   return {
     account_id: body.accountId,
-    domain: body.domain,
+    domain,
     provider_source: body.providerSource,
     dns_provider_uuid: body.dnsProviderUuid,
     dns_zone_uuid: body.dnsZoneUuid ?? '',
@@ -455,11 +460,15 @@ function domainForm(rawBody: unknown) {
 }
 
 export async function createAxisNowDomain(client: DnsmgrClient, config: AppConfig, context: RequestContext, rawBody: unknown) {
-  return operationResult(await postPayload(client, config, context, '/axisnow/domains/create', domainForm(rawBody)))
+  const body = AxisNowDomainMutationSchema.parse(rawBody)
+  return operationResult(await postPayload(client, config, context, '/axisnow/domains/create', domainForm(body, body.domain)))
 }
 
 export async function updateAxisNowDomain(client: DnsmgrClient, config: AppConfig, context: RequestContext, rawUuid: string, rawBody: unknown) {
-  return operationResult(await postPayload(client, config, context, '/axisnow/domains/update', { uuid: UuidSchema.parse(rawUuid), ...domainForm(rawBody) }))
+  const uuid = UuidSchema.parse(rawUuid)
+  const body = AxisNowDomainUpdateMutationSchema.parse(rawBody)
+  const current = await getAxisNowDomain(client, config, context, body.accountId, uuid)
+  return operationResult(await postPayload(client, config, context, '/axisnow/domains/update', { uuid, ...domainForm(body, current.domain) }))
 }
 
 export async function deleteAxisNowDomain(client: DnsmgrClient, config: AppConfig, context: RequestContext, accountId: number, rawUuid: string) {

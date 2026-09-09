@@ -136,6 +136,20 @@ describe('typed AxisNow API', () => {
         })
         return json({ code: 0, msg: '调度域名创建成功' })
       }
+      if (url.pathname === '/internal/axisnow/domains/update') {
+        mutations.push(url.pathname)
+        const body = form(init)
+        expect(Object.fromEntries(body)).toMatchObject({
+          uuid: domainUuid,
+          account_id: String(accountId),
+          domain: 'route.example.com',
+          provider_source: 'platform',
+          dns_provider_uuid: providerUuid,
+          dns_zone_uuid: zoneUuid,
+          record_type: 'A',
+        })
+        return json({ code: 0, msg: '调度域名修改成功' })
+      }
       throw new Error(`unexpected upstream route: ${url.pathname}`)
     })
 
@@ -185,7 +199,27 @@ describe('typed AxisNow API', () => {
       recordType: 'A',
     } })
     expect(created.json()).toEqual({ code: 'OK', message: '调度域名创建成功' })
-    expect(mutations).toEqual(['/internal/axisnow/domains/create'])
+
+    const updated = await app.inject({ method: 'PUT', url: `/api/web/v1/axisnow/domains/${domainUuid}`, headers, payload: {
+      accountId,
+      providerSource: 'platform',
+      dnsProviderUuid: providerUuid,
+      dnsZoneUuid: zoneUuid,
+      recordType: 'A',
+      name: '生产路由',
+    } })
+    expect(updated.json()).toEqual({ code: 'OK', message: '调度域名修改成功' })
+
+    const renamed = await app.inject({ method: 'PUT', url: `/api/web/v1/axisnow/domains/${domainUuid}`, headers, payload: {
+      accountId,
+      domain: 'renamed.example.com',
+      providerSource: 'platform',
+      dnsProviderUuid: providerUuid,
+      dnsZoneUuid: zoneUuid,
+      recordType: 'A',
+    } })
+    expect(renamed.statusCode).toBe(422)
+    expect(mutations).toEqual(['/internal/axisnow/domains/create', '/internal/axisnow/domains/update'])
   })
 
   it('covers shared EIP visibility, tag editing and array mutation forms', async () => {
