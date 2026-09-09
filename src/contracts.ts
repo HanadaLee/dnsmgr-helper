@@ -823,6 +823,7 @@ export type AxisNowRule = {
   action: Record<string, unknown>
   createdAt?: string
   updatedAt?: string
+  resolvedUpdatedAt?: string
 }
 
 export type AxisNowEip = {

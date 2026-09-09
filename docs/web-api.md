@@ -405,7 +405,7 @@ AxisNow 接口按平台账户隔离，helper 只访问原 dnsmgr 已登记的控
 
 AxisNow 托管域名提交 `providerSource: "platform"`、所选 `dnsProviderUuid` 与 `dnsZoneUuid`；前端只允许填写前缀并从后缀列表选择。自托管提交 `providerSource: "self-hosted"` 和联动的 DNS 提供商 UUID。EIP 列表的 `dataOrigin` 区分 `own` 与 `subscribed`，共享订阅项会返回 `canManage: false` 和 `providerName`，前端不会允许编辑或删除。
 
-路由规则列表通过 `poolGroups`、`poolAddresses`、`poolAddressCount` 和 `poolTruncated` 描述完整地址池，通过 `strategyQuantity`、`strategyInterval` 描述选取策略；地址对象同时提供 `countryCode`、`ispName`、`providerName` 与 `tagNames` 元数据。`resolvedAddresses` 只包含过滤不可用候选后、按策略数量截取的实际解析地址，不等同于完整候选地址池。
+路由规则列表通过 `poolGroups`、`poolAddresses`、`poolAddressCount` 和 `poolTruncated` 描述完整地址池，通过 `strategyQuantity`、`strategyInterval` 描述选取策略；地址对象同时提供 `countryCode`、`ispName`、`providerName` 与 `tagNames` 元数据。`resolvedAddresses` 来自 AxisNow 已生成的 DNS 记录，不等同于完整候选地址池；`resolvedUpdatedAt` 来自该规则最新调度事件的 `time_iso8601`，规则配置本身的更新时间仍由 `updatedAt` 提供。
 
 ## CloudFlare
 

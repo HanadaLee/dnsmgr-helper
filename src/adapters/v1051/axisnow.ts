@@ -233,6 +233,7 @@ function normalizeRule(value: unknown): AxisNowRule {
   const poolSummary = stringValue(row.pool_summary)
   const createdAt = stringValue(row.created_at)
   const updatedAt = stringValue(row.updated_at)
+  const resolvedUpdatedAt = stringValue(row.resolved_updated_at)
   const poolGroups = Array.isArray(row.pool_groups)
     ? row.pool_groups.flatMap((value) => {
       const group = objectValue(value)
@@ -294,6 +295,7 @@ function normalizeRule(value: unknown): AxisNowRule {
     action: objectValue(row.action) ?? {},
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
+    ...(resolvedUpdatedAt ? { resolvedUpdatedAt } : {}),
   }
 }
 

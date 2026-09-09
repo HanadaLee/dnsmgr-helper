@@ -109,6 +109,7 @@ describe('typed AxisNow API', () => {
           strategy_interval: 5,
           resolved_addresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false, country_code: 'HK', isp_name: '测试线路', provider_name: '测试提供商', tag_names: ['edge.test'] }],
           updated_at: '2026-09-09T01:02:03Z',
+          resolved_updated_at: '2026-09-09T01:08:09Z',
           action: { conf: { address_pool: { groups: [{ type: 'eip', eip_uuids: [eipUuid] }] } } },
         }] })
       }
@@ -168,6 +169,7 @@ describe('typed AxisNow API', () => {
         strategyInterval: 5,
         resolvedAddresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false, countryCode: 'HK', ispName: '测试线路', providerName: '测试提供商', tagNames: ['edge.test'] }],
         updatedAt: '2026-09-09T01:02:03Z',
+        resolvedUpdatedAt: '2026-09-09T01:08:09Z',
       }],
     })
 
