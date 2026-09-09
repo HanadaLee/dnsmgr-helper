@@ -98,6 +98,13 @@ describe('typed AxisNow API', () => {
           status: 'active',
           strategy: 'quality_optimized',
           pool_summary: '1 个 EIP',
+          pool_groups: [{ type: 'eip', type_name: 'EIP', count: 1, items: ['192.0.2.10'] }],
+          pool_address_count: 1,
+          pool_truncated: false,
+          strategy_quantity: 1,
+          strategy_interval: 5,
+          resolved_addresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false }],
+          updated_at: '2026-09-09T01:02:03Z',
           action: { conf: { address_pool: { groups: [{ type: 'eip', eip_uuids: [eipUuid] }] } } },
         }] })
       }
@@ -140,7 +147,21 @@ describe('typed AxisNow API', () => {
     expect(options.json()).toMatchObject({ code: 'OK', data: { eips: [{ uuid: eipUuid, name: '192.0.2.10' }], geoIspOptions: [{ name: '中国电信' }] } })
 
     const rules = await app.inject({ method: 'GET', url: `/api/web/v1/axisnow/accounts/${accountId}/domains/${domainUuid}/rules`, headers })
-    expect(rules.json()).toMatchObject({ code: 'OK', meta: { total: 1 }, data: [{ uuid: ruleUuid, geoIspName: '中国电信', poolSummary: '1 个 EIP' }] })
+    expect(rules.json()).toMatchObject({
+      code: 'OK',
+      meta: { total: 1 },
+      data: [{
+        uuid: ruleUuid,
+        geoIspName: '中国电信',
+        poolSummary: '1 个 EIP',
+        poolAddressCount: 1,
+        poolGroups: [{ type: 'eip', typeName: 'EIP', count: 1, items: ['192.0.2.10'] }],
+        strategyQuantity: 1,
+        strategyInterval: 5,
+        resolvedAddresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false }],
+        updatedAt: '2026-09-09T01:02:03Z',
+      }],
+    })
 
     const rule = await app.inject({ method: 'GET', url: `/api/web/v1/axisnow/accounts/${accountId}/domains/${domainUuid}/rules/${ruleUuid}`, headers })
     expect(rule.json()).toMatchObject({ code: 'OK', data: { uuid: ruleUuid, status: 'paused' } })

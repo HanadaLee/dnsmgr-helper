@@ -111,6 +111,12 @@ function numberValue(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+function optionalNumberValue(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 function booleanValue(value: unknown): boolean {
   return value === true || value === 1 || value === '1'
 }
@@ -227,6 +233,35 @@ function normalizeRule(value: unknown): AxisNowRule {
   const poolSummary = stringValue(row.pool_summary)
   const createdAt = stringValue(row.created_at)
   const updatedAt = stringValue(row.updated_at)
+  const poolGroups = Array.isArray(row.pool_groups)
+    ? row.pool_groups.flatMap((value) => {
+      const group = objectValue(value)
+      if (!group) return []
+      return [{
+        type: stringValue(group.type) ?? 'unknown',
+        typeName: stringValue(group.type_name) ?? '地址',
+        count: numberValue(group.count),
+        items: stringList(group.items),
+      }]
+    })
+    : []
+  const resolvedAddresses = Array.isArray(row.resolved_addresses)
+    ? row.resolved_addresses.flatMap((value) => {
+      const address = objectValue(value)
+      const addressValue = stringValue(address?.address)
+      if (!address || !addressValue) return []
+      const score = optionalNumberValue(address.score)
+      const addressStatus = stringValue(address.status)
+      return [{
+        address: addressValue,
+        ...(score !== undefined ? { score } : {}),
+        ...(addressStatus ? { status: addressStatus } : {}),
+        qualityFiltered: booleanValue(address.quality_filtered),
+      }]
+    })
+    : []
+  const strategyQuantity = optionalNumberValue(row.strategy_quantity)
+  const strategyInterval = optionalNumberValue(row.strategy_interval)
   return {
     uuid: requiredString(row.uuid, 'AxisNow 路由规则缺少 UUID'),
     accountId: numberValue(row.account_id),
@@ -240,6 +275,12 @@ function normalizeRule(value: unknown): AxisNowRule {
     status: row.status === 'paused' ? 'paused' : 'active',
     ...(strategy ? { strategy } : {}),
     ...(poolSummary ? { poolSummary } : {}),
+    poolGroups,
+    poolAddressCount: numberValue(row.pool_address_count),
+    poolTruncated: booleanValue(row.pool_truncated),
+    ...(strategyQuantity !== undefined ? { strategyQuantity } : {}),
+    ...(strategyInterval !== undefined ? { strategyInterval } : {}),
+    resolvedAddresses,
     action: objectValue(row.action) ?? {},
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
