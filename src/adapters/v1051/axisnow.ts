@@ -245,8 +245,8 @@ function normalizeRule(value: unknown): AxisNowRule {
       }]
     })
     : []
-  const resolvedAddresses = Array.isArray(row.resolved_addresses)
-    ? row.resolved_addresses.flatMap((value) => {
+  const normalizeAddresses = (value: unknown) => Array.isArray(value)
+    ? value.flatMap((value) => {
       const address = objectValue(value)
       const addressValue = stringValue(address?.address)
       if (!address || !addressValue) return []
@@ -260,6 +260,8 @@ function normalizeRule(value: unknown): AxisNowRule {
       }]
     })
     : []
+  const poolAddresses = normalizeAddresses(row.pool_addresses)
+  const resolvedAddresses = normalizeAddresses(row.resolved_addresses)
   const strategyQuantity = optionalNumberValue(row.strategy_quantity)
   const strategyInterval = optionalNumberValue(row.strategy_interval)
   return {
@@ -276,6 +278,7 @@ function normalizeRule(value: unknown): AxisNowRule {
     ...(strategy ? { strategy } : {}),
     ...(poolSummary ? { poolSummary } : {}),
     poolGroups,
+    poolAddresses,
     poolAddressCount: numberValue(row.pool_address_count),
     poolTruncated: booleanValue(row.pool_truncated),
     ...(strategyQuantity !== undefined ? { strategyQuantity } : {}),
