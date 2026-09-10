@@ -277,4 +277,95 @@ describe('typed AxisNow API', () => {
     const updated = await app.inject({ method: 'PUT', url: `/api/web/v1/axisnow/tags/${tagUuid}`, headers, payload: { accountId, name: '中国电信优化', description: null } })
     expect(updated.json()).toEqual({ code: 'OK', message: '标签修改成功' })
   })
+
+  it('translates AxisNow automation configuration, status and restore actions', async () => {
+    const tidePool = { mode: 'customize', groups: [{ type: 'ip', ips: ['192.0.2.20'] }] }
+    const failoverPool = { mode: 'customize', groups: [{ type: 'ip', ips: ['192.0.2.30'] }] }
+    const app = await appWith((url, init) => {
+      if (url.pathname === `/internal/axisnow/rules/automation/${accountId}/${ruleUuid}`) {
+        expect(init.method).toBe('GET')
+        return json({ code: 0, data: {
+          configured: true,
+          rule_uuid: ruleUuid,
+          domain_uuid: domainUuid,
+          rule_type: 'A',
+          geo_isp: 'default',
+          primary_pool: { mode: 'all_valid_eips' },
+          tide_enabled: true,
+          tide_start: '22:00',
+          tide_end: '06:00',
+          tide_pool: tidePool,
+          failover_enabled: true,
+          failover_pool: failoverPool,
+          failure_threshold: 3,
+          check_interval_minutes: 5,
+          active_pool: 'tide',
+          failover_state: 'armed',
+          fail_count: 1,
+          last_check_at: 1_757_000_000,
+          last_health_state: 'partial',
+          last_switch_at: 1_756_999_000,
+          last_error: '',
+          has_probe_template: true,
+          logs: [{ id: 9, action: 'tide', status: 'success', message: '进入潮汐时间段', created_at: '2026-09-10 06:00:00' }],
+        } })
+      }
+      if (url.pathname === '/internal/axisnow/rules/automation/save') {
+        expect(init.method).toBe('POST')
+        const body = form(init)
+        expect(Object.fromEntries(body)).toMatchObject({
+          account_id: String(accountId),
+          rule_uuid: ruleUuid,
+          tide_enabled: '1',
+          tide_start: '23:00',
+          tide_end: '07:00',
+          failover_enabled: '1',
+          failure_threshold: '4',
+          check_interval_minutes: '10',
+        })
+        expect(JSON.parse(body.get('tide_pool') ?? '')).toEqual(tidePool)
+        expect(JSON.parse(body.get('failover_pool') ?? '')).toEqual(failoverPool)
+        return json({ code: 0, msg: '自动调度配置已保存' })
+      }
+      if (url.pathname === '/internal/axisnow/rules/automation/restore') {
+        expect(init.method).toBe('POST')
+        expect(Object.fromEntries(form(init))).toEqual({ account_id: String(accountId), rule_uuid: ruleUuid })
+        return json({ code: 0, msg: '已恢复主地址池并重新布防' })
+      }
+      throw new Error(`unexpected upstream route: ${url.pathname}`)
+    })
+
+    const path = `/api/web/v1/axisnow/accounts/${accountId}/domains/${domainUuid}/rules/${ruleUuid}/automation`
+    const loaded = await app.inject({ method: 'GET', url: path, headers })
+    expect(loaded.json()).toMatchObject({
+      code: 'OK',
+      data: {
+        configured: true,
+        tideEnabled: true,
+        tideStart: '22:00',
+        tidePool,
+        failoverEnabled: true,
+        failoverPool,
+        activePool: 'tide',
+        failCount: 1,
+        lastHealthState: 'partial',
+        logs: [{ id: 9, action: 'tide', status: 'success', createdAt: '2026-09-10 06:00:00' }],
+      },
+    })
+
+    const saved = await app.inject({ method: 'PUT', url: path, headers, payload: {
+      tideEnabled: true,
+      tideStart: '23:00',
+      tideEnd: '07:00',
+      tidePool,
+      failoverEnabled: true,
+      failoverPool,
+      failureThreshold: 4,
+      checkIntervalMinutes: 10,
+    } })
+    expect(saved.json()).toEqual({ code: 'OK', message: '自动调度配置已保存' })
+
+    const restored = await app.inject({ method: 'POST', url: `${path}/restore`, headers })
+    expect(restored.json()).toEqual({ code: 'OK', message: '已恢复主地址池并重新布防' })
+  })
 })

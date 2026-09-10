@@ -33,6 +33,7 @@ import {
   getAxisNowDomain,
   getAxisNowOptions,
   getAxisNowRule,
+  getAxisNowRuleAutomation,
   getAxisNowTag,
   listAxisNowAccounts,
   listAxisNowDomains,
@@ -40,6 +41,8 @@ import {
   listAxisNowRules,
   listAxisNowTags,
   setAxisNowRuleStatus,
+  saveAxisNowRuleAutomation,
+  restoreAxisNowRuleAutomation,
   updateAxisNowDomain,
   updateAxisNowEip,
   updateAxisNowRule,
@@ -1791,6 +1794,30 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     return {
       code: 'OK',
       ...await deleteAxisNowRule(client, config, upstreamContext(request, config), params.accountId, params.ruleUuid),
+    }
+  })
+
+  app.get('/api/web/v1/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid/automation', async (request) => {
+    const params = AxisNowRuleParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      data: await getAxisNowRuleAutomation(client, config, upstreamContext(request, config), params.accountId, params.ruleUuid),
+    }
+  })
+
+  app.put('/api/web/v1/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid/automation', async (request) => {
+    const params = AxisNowRuleParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await saveAxisNowRuleAutomation(client, config, upstreamContext(request, config), params.accountId, params.ruleUuid, request.body),
+    }
+  })
+
+  app.post('/api/web/v1/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid/automation/restore', async (request) => {
+    const params = AxisNowRuleParamsSchema.parse(request.params)
+    return {
+      code: 'OK',
+      ...await restoreAxisNowRuleAutomation(client, config, upstreamContext(request, config), params.accountId, params.ruleUuid),
     }
   })
 

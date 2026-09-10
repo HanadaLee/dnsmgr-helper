@@ -8,6 +8,8 @@ import type {
   AxisNowEip,
   AxisNowEipOptions,
   AxisNowRule,
+  AxisNowRuleAutomation,
+  AxisNowRuleAutomationLog,
   AxisNowRuleOptions,
   AxisNowTag,
   PageMeta,
@@ -34,6 +36,31 @@ const ListQuerySchema = z.object({
 
 const NullableText = z.string().trim().max(255).nullable().optional()
 const AccountId = z.coerce.number().int().positive()
+
+const AutomationPoolSchema = z.record(z.string().min(1).max(64), z.unknown())
+
+export const AxisNowRuleAutomationMutationSchema = z.object({
+  accountId: AccountId,
+  ruleUuid: UuidSchema,
+  tideEnabled: z.boolean().default(false),
+  tideStart: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, '潮汐开始时间格式无效').default('09:00'),
+  tideEnd: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, '潮汐结束时间格式无效').default('18:00'),
+  tidePool: AutomationPoolSchema.nullable().optional(),
+  failoverEnabled: z.boolean().default(false),
+  failoverPool: AutomationPoolSchema.nullable().optional(),
+  failureThreshold: z.coerce.number().int().min(1).max(10).default(3),
+  checkIntervalMinutes: z.coerce.number().int().min(1).max(60).default(5),
+}).strict().superRefine((value, context) => {
+  if (value.tideEnabled && !value.tidePool) {
+    context.addIssue({ code: 'custom', path: ['tidePool'], message: '开启潮汐调度时必须填写潮汐地址池' })
+  }
+  if (value.failoverEnabled && !value.failoverPool) {
+    context.addIssue({ code: 'custom', path: ['failoverPool'], message: '开启备份调度时必须填写故障备份地址池' })
+  }
+  if (value.tideEnabled && value.tideStart === value.tideEnd) {
+    context.addIssue({ code: 'custom', path: ['tideEnd'], message: '潮汐调度的开始和结束时间不能相同' })
+  }
+})
 
 const AxisNowDomainFields = {
   accountId: AccountId,
@@ -240,6 +267,11 @@ function normalizeRule(value: unknown): AxisNowRule {
   const createdAt = stringValue(row.created_at)
   const updatedAt = stringValue(row.updated_at)
   const resolvedUpdatedAt = stringValue(row.resolved_updated_at)
+  const automation = objectValue(row.automation)
+  const automationActivePool = stringValue(automation?.active_pool)
+  const automationFailoverState = stringValue(automation?.failover_state)
+  const automationHealthState = stringValue(automation?.last_health_state)
+  const automationLastError = stringValue(automation?.last_error)
   const poolGroups = Array.isArray(row.pool_groups)
     ? row.pool_groups.flatMap((value) => {
       const group = objectValue(value)
@@ -302,6 +334,69 @@ function normalizeRule(value: unknown): AxisNowRule {
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
     ...(resolvedUpdatedAt ? { resolvedUpdatedAt } : {}),
+    ...(automation ? {
+      automation: {
+        configured: booleanValue(automation.configured),
+        ...(automation.tide_enabled !== undefined ? { tideEnabled: booleanValue(automation.tide_enabled) } : {}),
+        ...(automation.failover_enabled !== undefined ? { failoverEnabled: booleanValue(automation.failover_enabled) } : {}),
+        ...(automationActivePool ? { activePool: automationActivePool } : {}),
+        ...(automationFailoverState ? { failoverState: automationFailoverState } : {}),
+        ...(automation.fail_count !== undefined ? { failCount: numberValue(automation.fail_count) } : {}),
+        ...(automation.failure_threshold !== undefined ? { failureThreshold: numberValue(automation.failure_threshold) } : {}),
+        ...(automationHealthState ? { lastHealthState: automationHealthState } : {}),
+        ...(automation.last_switch_at !== undefined ? { lastSwitchAt: numberValue(automation.last_switch_at) } : {}),
+        ...(automationLastError ? { lastError: automationLastError } : {}),
+      },
+    } : {}),
+  }
+}
+
+function normalizeAutomationLog(value: unknown): AxisNowRuleAutomationLog {
+  const row = objectValue(value) ?? {}
+  const status = stringValue(row.status)
+  const createdAt = stringValue(row.created_at)
+  return {
+    id: numberValue(row.id),
+    action: stringValue(row.action) ?? 'unknown',
+    status: status === 'success' ? 'success' : status === 'failed' ? 'failed' : 'unknown',
+    message: stringValue(row.message) ?? '',
+    ...(createdAt ? { createdAt } : {}),
+  }
+}
+
+function normalizeAutomation(value: unknown): AxisNowRuleAutomation {
+  const row = objectValue(value)
+  if (!row) throw new ApiError(502, 'UPSTREAM_INVALID_AXISNOW_AUTOMATION', '原 dnsmgr 返回了无法识别的 AxisNow 自动调度配置')
+  const primaryPool = objectValue(row.primary_pool)
+  if (!primaryPool) throw new ApiError(502, 'UPSTREAM_INVALID_AXISNOW_AUTOMATION', 'AxisNow 自动调度缺少主地址池')
+  const tidePool = objectValue(row.tide_pool)
+  const failoverPool = objectValue(row.failover_pool)
+  const logs = Array.isArray(row.logs) ? row.logs.map(normalizeAutomationLog) : []
+  const ruleType = stringValue(row.rule_type) ?? 'A'
+  return {
+    configured: booleanValue(row.configured),
+    ruleUuid: requiredString(row.rule_uuid, 'AxisNow 自动调度缺少规则 UUID'),
+    domainUuid: requiredString(row.domain_uuid, 'AxisNow 自动调度缺少域名 UUID'),
+    ruleType,
+    geoIsp: stringValue(row.geo_isp) ?? 'default',
+    primaryPool,
+    tideEnabled: booleanValue(row.tide_enabled),
+    tideStart: stringValue(row.tide_start) ?? '09:00',
+    tideEnd: stringValue(row.tide_end) ?? '18:00',
+    ...(tidePool ? { tidePool } : {}),
+    failoverEnabled: booleanValue(row.failover_enabled),
+    ...(failoverPool ? { failoverPool } : {}),
+    failureThreshold: numberValue(row.failure_threshold, 3),
+    checkIntervalMinutes: Math.max(1, numberValue(row.check_interval_minutes, 5)),
+    activePool: stringValue(row.active_pool) ?? 'primary',
+    failoverState: stringValue(row.failover_state) ?? 'armed',
+    failCount: numberValue(row.fail_count),
+    lastCheckAt: numberValue(row.last_check_at),
+    lastHealthState: stringValue(row.last_health_state) ?? '',
+    lastSwitchAt: numberValue(row.last_switch_at),
+    lastError: stringValue(row.last_error) ?? '',
+    hasProbeTemplate: booleanValue(row.has_probe_template),
+    logs,
   }
 }
 
@@ -567,6 +662,62 @@ export async function setAxisNowRuleStatus(client: DnsmgrClient, config: AppConf
 
 export async function deleteAxisNowRule(client: DnsmgrClient, config: AppConfig, context: RequestContext, accountId: number, rawUuid: string) {
   return operationResult(await postPayload(client, config, context, '/axisnow/rules/delete', { account_id: AccountId.parse(accountId), uuid: UuidSchema.parse(rawUuid) }))
+}
+
+export async function getAxisNowRuleAutomation(
+  client: DnsmgrClient,
+  config: AppConfig,
+  context: RequestContext,
+  accountId: number,
+  rawUuid: string,
+): Promise<AxisNowRuleAutomation> {
+  const payload = await getPayload(
+    client,
+    config,
+    context,
+    `/axisnow/rules/automation/${AccountId.parse(accountId)}/${UuidSchema.parse(rawUuid)}`,
+  )
+  return normalizeAutomation(payload.data)
+}
+
+export async function saveAxisNowRuleAutomation(
+  client: DnsmgrClient,
+  config: AppConfig,
+  context: RequestContext,
+  accountId: number,
+  rawUuid: string,
+  rawBody: unknown,
+) {
+  const body = AxisNowRuleAutomationMutationSchema.parse({
+    ...(rawBody && typeof rawBody === 'object' ? rawBody : {}),
+    accountId,
+    ruleUuid: rawUuid,
+  })
+  return operationResult(await postPayload(client, config, context, '/axisnow/rules/automation/save', {
+    account_id: body.accountId,
+    rule_uuid: body.ruleUuid,
+    tide_enabled: body.tideEnabled,
+    tide_start: body.tideStart,
+    tide_end: body.tideEnd,
+    tide_pool: body.tidePool ? JSON.stringify(body.tidePool) : '',
+    failover_enabled: body.failoverEnabled,
+    failover_pool: body.failoverPool ? JSON.stringify(body.failoverPool) : '',
+    failure_threshold: body.failureThreshold,
+    check_interval_minutes: body.checkIntervalMinutes,
+  }))
+}
+
+export async function restoreAxisNowRuleAutomation(
+  client: DnsmgrClient,
+  config: AppConfig,
+  context: RequestContext,
+  accountId: number,
+  rawUuid: string,
+) {
+  return operationResult(await postPayload(client, config, context, '/axisnow/rules/automation/restore', {
+    account_id: AccountId.parse(accountId),
+    rule_uuid: UuidSchema.parse(rawUuid),
+  }))
 }
 
 export async function listAxisNowEips(client: DnsmgrClient, config: AppConfig, context: RequestContext, rawQuery: unknown) {

@@ -396,6 +396,8 @@ AxisNow 接口按平台账户隔离，helper 只访问原 dnsmgr 已登记的控
 | `GET/POST` | `/axisnow/accounts/:accountId/domains/:domainUuid/rules` | 路由规则列表和新增 |
 | `GET/PUT/DELETE` | `/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid` | 路由规则详情、修改和删除 |
 | `PATCH` | `/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid/status` | 启用或暂停路由规则 |
+| `GET/PUT` | `/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid/automation` | 读取和保存潮汐/故障备份自动调度配置 |
+| `POST` | `/axisnow/accounts/:accountId/domains/:domainUuid/rules/:ruleUuid/automation/restore` | 故障切换后恢复主地址池并重新布防 |
 | `GET/POST` | `/axisnow/eips` | 自有及共享订阅 EIP 列表和新增 |
 | `PUT` | `/axisnow/eips/:uuid` | 修改可管理 EIP |
 | `POST` | `/axisnow/eips/batch-delete` | 按平台账户批量删除 EIP |
@@ -406,6 +408,8 @@ AxisNow 接口按平台账户隔离，helper 只访问原 dnsmgr 已登记的控
 AxisNow 托管域名提交 `providerSource: "platform"`、所选 `dnsProviderUuid` 与 `dnsZoneUuid`；前端只允许填写前缀并从后缀列表选择。自托管提交 `providerSource: "self-hosted"` 和联动的 DNS 提供商 UUID。EIP 列表的 `dataOrigin` 区分 `own` 与 `subscribed`，共享订阅项会返回 `canManage: false` 和 `providerName`，前端不会允许编辑或删除。
 
 路由规则列表通过 `poolGroups`、`poolAddresses`、`poolAddressCount` 和 `poolTruncated` 描述完整地址池，通过 `strategyQuantity`、`strategyInterval` 描述选取策略；地址对象同时提供 `countryCode`、`ispName`、`providerName` 与 `tagNames` 元数据。`resolvedAddresses` 来自 AxisNow 已生成的 DNS 记录，不等同于完整候选地址池；`resolvedUpdatedAt` 来自该规则最新调度事件的 `time_iso8601`，规则配置本身的更新时间仍由 `updatedAt` 提供。
+
+自动调度详情中的 `primaryPool` 是规则当前地址池的快照；`tidePool` 和 `failoverPool` 是预先保存的 AxisNow 地址池对象。故障备份只适用于 A 记录：只有所有候选地址都有明确的 `unavailable` 探测结果并连续达到 `failureThreshold` 才会切换，空列表、缺失状态或数量不完整都不会触发。切换状态为 `switched` 后不会自动回切，必须调用 `restore`；潮汐时间段支持跨午夜配置，计划任务由原 dnsmgr 的 `certtask` 调度链执行。
 
 ## CloudFlare
 

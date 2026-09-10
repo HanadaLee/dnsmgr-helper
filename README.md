@@ -22,7 +22,7 @@
 - 动态证书字段转换为结构化显示条件，列表凭据脱敏，日志文件标识和系统设置键严格校验
 - CloudFlare 自定义主机名、所有权/证书验证、Fallback、DCV 委派与批量操作 API
 - CloudFlare Tunnel、敏感令牌、Public Hostname、CIDR 和主机名路由的完整 API
-- AxisNow DNS 路由、线路规则、EIP（含共享订阅）和标签管理的完整类型化 API
+- AxisNow DNS 路由、线路规则、潮汐/故障备份自动调度、EIP（含共享订阅）和标签管理的完整类型化 API
 - 仪表盘统计/服务器信息/缓存清理、用户全生命周期、域名权限与脱敏操作日志 API
 - 登录、通知、代理和计划任务的固定字段设置，以及邮件、Telegram、Webhook 和代理测试 API
 - 原 `/api/domain`、`/api/record/*`、`/api/cert/order` 的表单、签名和响应语义兼容
@@ -205,7 +205,7 @@ docker build -t dnsmgr:local docker/dnsmgr
 | `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/certificate-deployments...` | 自动部署任务、批量操作和日志 |
 | `GET/POST/PUT/DELETE` | `/api/web/v1/certificate-cnames...` | DCV 托管校验和立即验证 |
 | `GET/PUT` | `/api/web/v1/certificate-settings` | 自动续签、部署时段和通知设置 |
-| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/axisnow...` | 平台账户、DNS 路由、线路规则、EIP 和标签 |
+| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/axisnow...` | 平台账户、DNS 路由、线路规则、自动调度、EIP 和标签 |
 | `GET/POST/PUT/DELETE` | `/api/web/v1/cloudflare/domains/:id...` | 自定义主机名、验证、Fallback、DCV 和默认线路 |
 | `GET/POST/PUT/DELETE` | `/api/web/v1/cloudflare/accounts/:id/tunnels...` | Tunnel、Token、公网主机名、CIDR 和主机名路由 |
 | `GET/POST` | `/api/web/v1/dashboard...` | 仪表盘统计、服务器信息、版本检查和缓存清理 |
@@ -231,4 +231,4 @@ npm test
 npm run build
 ```
 
-测试覆盖身份认证 URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、认证关闭模式、Cookie 隔离、上游日志脱敏、v1051 字段转换、账户密钥脱敏、版本化页面状态解析、域名局部更新、记录单项与批量转换、监控/定时/优选 IP 全操作转换、证书账户/订单/部署/DCV 托管校验/设置全操作转换、证书制品与日志边界、CloudFlare 自定义主机名与 Tunnel 全操作转换、AxisNow 路由/EIP/标签转换、仪表盘、用户脱敏/权限/CRUD、操作日志、个人安全、固定系统设置、通知/代理测试、公开 API 原响应与后台执行入口、全量操作白名单、PHP 表单编码与动态路径拦截，不会连接真实认证服务、数据库或 DNS 供应商。
+测试覆盖身份认证 URL、Ticket 验证、Session 签发、现有用户登录、缺失用户自动创建、退出清理、认证关闭模式、Cookie 隔离、上游日志脱敏、v1051 字段转换、账户密钥脱敏、版本化页面状态解析、域名局部更新、记录单项与批量转换、监控/定时/优选 IP 全操作转换、证书账户/订单/部署/DCV 托管校验/设置全操作转换、证书制品与日志边界、CloudFlare 自定义主机名与 Tunnel 全操作转换、AxisNow 路由/自动调度/EIP/标签转换、仪表盘、用户脱敏/权限/CRUD、操作日志、个人安全、固定系统设置、通知/代理测试、公开 API 原响应与后台执行入口、全量操作白名单、PHP 表单编码与动态路径拦截，不会连接真实认证服务、数据库或 DNS 供应商。

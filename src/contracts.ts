@@ -800,6 +800,40 @@ export type AxisNowRuleResolvedAddress = {
   tagNames: string[]
 }
 
+export type AxisNowRuleAutomationLog = {
+  id: number
+  action: string
+  status: 'success' | 'failed' | 'unknown'
+  message: string
+  createdAt?: string
+}
+
+export type AxisNowRuleAutomation = {
+  configured: boolean
+  ruleUuid: string
+  domainUuid: string
+  ruleType: 'A' | 'CNAME' | string
+  geoIsp: string
+  primaryPool: Record<string, unknown>
+  tideEnabled: boolean
+  tideStart: string
+  tideEnd: string
+  tidePool?: Record<string, unknown>
+  failoverEnabled: boolean
+  failoverPool?: Record<string, unknown>
+  failureThreshold: number
+  checkIntervalMinutes: number
+  activePool: 'primary' | 'tide' | 'failover' | string
+  failoverState: 'armed' | 'switching' | 'switched' | 'restoring' | string
+  failCount: number
+  lastCheckAt: number
+  lastHealthState: string
+  lastSwitchAt: number
+  lastError: string
+  hasProbeTemplate: boolean
+  logs: AxisNowRuleAutomationLog[]
+}
+
 export type AxisNowRule = {
   uuid: string
   accountId: number
@@ -824,6 +858,18 @@ export type AxisNowRule = {
   createdAt?: string
   updatedAt?: string
   resolvedUpdatedAt?: string
+  automation?: {
+    configured: boolean
+    tideEnabled?: boolean
+    failoverEnabled?: boolean
+    activePool?: string
+    failoverState?: string
+    failCount?: number
+    failureThreshold?: number
+    lastHealthState?: string
+    lastSwitchAt?: number
+    lastError?: string
+  }
 }
 
 export type AxisNowEip = {
