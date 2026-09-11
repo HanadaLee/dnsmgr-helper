@@ -311,6 +311,7 @@ function normalizeRule(value: unknown): AxisNowRule {
       const score = optionalNumberValue(address.score)
       const addressStatus = stringValue(address.status)
       const countryCode = stringValue(address.country_code)
+      const provinceCode = stringValue(address.province_code)
       const ispName = stringValue(address.isp_name)
       const providerName = stringValue(address.provider_name)
       return [{
@@ -319,6 +320,7 @@ function normalizeRule(value: unknown): AxisNowRule {
         ...(addressStatus ? { status: addressStatus } : {}),
         qualityFiltered: booleanValue(address.quality_filtered),
         ...(countryCode ? { countryCode } : {}),
+        ...(provinceCode ? { provinceCode } : {}),
         ...(ispName ? { ispName } : {}),
         ...(providerName ? { providerName } : {}),
         tagNames: stringList(address.tag_names),
@@ -656,11 +658,10 @@ export async function getAxisNowRule(client: DnsmgrClient, config: AppConfig, co
 
 function ruleForm(rawBody: unknown) {
   const body = AxisNowRuleMutationSchema.parse(rawBody)
-  return {
+  const form: Record<string, unknown> = {
     account_id: body.accountId,
     domain_uuid: body.domainUuid,
     geo_isp: body.geoIsp,
-    name: body.name ?? '',
     description: body.description ?? '',
     status: body.status,
     pool_type: body.poolType,
@@ -672,6 +673,8 @@ function ruleForm(rawBody: unknown) {
     ttl: body.ttl,
     edge_probe_template_uuid: body.edgeProbeTemplateUuid ?? '',
   }
+  if (body.name !== undefined) form.name = body.name ?? ''
+  return form
 }
 
 export async function createAxisNowRule(client: DnsmgrClient, config: AppConfig, context: RequestContext, rawBody: unknown) {

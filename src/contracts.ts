@@ -795,6 +795,7 @@ export type AxisNowRuleResolvedAddress = {
   status?: string
   qualityFiltered: boolean
   countryCode?: string
+  provinceCode?: string
   ispName?: string
   providerName?: string
   tagNames: string[]
