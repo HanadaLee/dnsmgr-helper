@@ -800,6 +800,12 @@ export type AxisNowRuleResolvedAddress = {
   tagNames: string[]
 }
 
+export type AxisNowRuleProbeStatus = {
+  address: string
+  status: string
+  avgConnectLatency?: number
+}
+
 export type AxisNowRuleAutomationLog = {
   id: number
   action: string
@@ -831,6 +837,9 @@ export type AxisNowRuleAutomation = {
   lastSwitchAt: number
   lastError: string
   hasProbeTemplate: boolean
+  probeTemplateUuid?: string
+  probeState?: string
+  probeStatuses: AxisNowRuleProbeStatus[]
   logs: AxisNowRuleAutomationLog[]
 }
 
@@ -854,6 +863,9 @@ export type AxisNowRule = {
   strategyQuantity?: number
   strategyInterval?: number
   resolvedAddresses: AxisNowRuleResolvedAddress[]
+  probeTemplateUuid?: string
+  probeState?: string
+  probeStatuses: AxisNowRuleProbeStatus[]
   action: Record<string, unknown>
   createdAt?: string
   updatedAt?: string

@@ -11,6 +11,7 @@ import type {
   AxisNowRuleAutomation,
   AxisNowRuleAutomationLog,
   AxisNowRuleOptions,
+  AxisNowRuleProbeStatus,
   AxisNowTag,
   PageMeta,
 } from '../../contracts.js'
@@ -160,6 +161,22 @@ function stringList(value: unknown): string[] {
     : []
 }
 
+function normalizeProbeStatuses(value: unknown): AxisNowRuleProbeStatus[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((value) => {
+    const row = objectValue(value)
+    const address = stringValue(row?.address)
+    if (!row || !address) return []
+    const status = stringValue(row.status) ?? ''
+    const latency = optionalNumberValue(row.avg_connect_latency)
+    return [{
+      address,
+      status,
+      ...(latency !== undefined ? { avgConnectLatency: latency } : {}),
+    }]
+  })
+}
+
 function requiredString(value: unknown, message: string): string {
   const result = stringValue(value)
   if (!result) throw new ApiError(502, 'UPSTREAM_INVALID_AXISNOW_DATA', message)
@@ -267,6 +284,8 @@ function normalizeRule(value: unknown): AxisNowRule {
   const createdAt = stringValue(row.created_at)
   const updatedAt = stringValue(row.updated_at)
   const resolvedUpdatedAt = stringValue(row.resolved_updated_at)
+  const probeTemplateUuid = stringValue(row.probe_template_uuid)
+  const probeState = stringValue(row.probe_state)
   const automation = objectValue(row.automation)
   const automationActivePool = stringValue(automation?.active_pool)
   const automationFailoverState = stringValue(automation?.failover_state)
@@ -330,6 +349,9 @@ function normalizeRule(value: unknown): AxisNowRule {
     ...(strategyQuantity !== undefined ? { strategyQuantity } : {}),
     ...(strategyInterval !== undefined ? { strategyInterval } : {}),
     resolvedAddresses,
+    probeStatuses: normalizeProbeStatuses(row.probe_statuses),
+    ...(probeTemplateUuid ? { probeTemplateUuid } : {}),
+    ...(probeState ? { probeState } : {}),
     action: objectValue(row.action) ?? {},
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
@@ -371,6 +393,8 @@ function normalizeAutomation(value: unknown): AxisNowRuleAutomation {
   if (!primaryPool) throw new ApiError(502, 'UPSTREAM_INVALID_AXISNOW_AUTOMATION', 'AxisNow 自动调度缺少主地址池')
   const tidePool = objectValue(row.tide_pool)
   const failoverPool = objectValue(row.failover_pool)
+  const probeTemplateUuid = stringValue(row.probe_template_uuid)
+  const probeState = stringValue(row.probe_state)
   const logs = Array.isArray(row.logs) ? row.logs.map(normalizeAutomationLog) : []
   const ruleType = stringValue(row.rule_type) ?? 'A'
   return {
@@ -396,6 +420,9 @@ function normalizeAutomation(value: unknown): AxisNowRuleAutomation {
     lastSwitchAt: numberValue(row.last_switch_at),
     lastError: stringValue(row.last_error) ?? '',
     hasProbeTemplate: booleanValue(row.has_probe_template),
+    probeStatuses: normalizeProbeStatuses(row.probe_statuses),
+    ...(probeTemplateUuid ? { probeTemplateUuid } : {}),
+    ...(probeState ? { probeState } : {}),
     logs,
   }
 }
