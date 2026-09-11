@@ -168,11 +168,9 @@ function normalizeProbeStatuses(value: unknown): AxisNowRuleProbeStatus[] {
     const address = stringValue(row?.address)
     if (!row || !address) return []
     const status = stringValue(row.status) ?? ''
-    const latency = optionalNumberValue(row.avg_connect_latency)
     return [{
       address,
       status,
-      ...(latency !== undefined ? { avgConnectLatency: latency } : {}),
     }]
   })
 }

@@ -804,7 +804,6 @@ export type AxisNowRuleResolvedAddress = {
 export type AxisNowRuleProbeStatus = {
   address: string
   status: string
-  avgConnectLatency?: number
 }
 
 export type AxisNowRuleAutomationLog = {

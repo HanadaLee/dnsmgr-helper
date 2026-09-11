@@ -110,7 +110,7 @@ describe('typed AxisNow API', () => {
           resolved_addresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false, country_code: 'HK', isp_name: '测试线路', provider_name: '测试提供商', tag_names: ['edge.test'] }],
           probe_template_uuid: providerUuid,
           probe_state: 'healthy',
-          probe_statuses: [{ address: '192.0.2.10', status: 'available', avg_connect_latency: 12 }],
+          probe_statuses: [{ address: '192.0.2.10', status: 'available' }],
           updated_at: '2026-09-09T01:02:03Z',
           resolved_updated_at: '2026-09-09T01:08:09Z',
           action: { conf: { address_pool: { groups: [{ type: 'eip', eip_uuids: [eipUuid] }] } } },
@@ -187,7 +187,7 @@ describe('typed AxisNow API', () => {
         resolvedAddresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false, countryCode: 'HK', ispName: '测试线路', providerName: '测试提供商', tagNames: ['edge.test'] }],
         probeTemplateUuid: providerUuid,
         probeState: 'healthy',
-        probeStatuses: [{ address: '192.0.2.10', status: 'available', avgConnectLatency: 12 }],
+        probeStatuses: [{ address: '192.0.2.10', status: 'available' }],
         updatedAt: '2026-09-09T01:02:03Z',
         resolvedUpdatedAt: '2026-09-09T01:08:09Z',
       }],
@@ -315,7 +315,7 @@ describe('typed AxisNow API', () => {
           has_probe_template: true,
           probe_template_uuid: providerUuid,
           probe_state: 'healthy',
-          probe_statuses: [{ address: '192.0.2.10', status: 'available', avg_connect_latency: 12 }],
+          probe_statuses: [{ address: '192.0.2.10', status: 'available' }],
           logs: [{ id: 9, action: 'tide', status: 'success', message: '进入潮汐时间段', created_at: '2026-09-10 06:00:00' }],
         } })
       }
@@ -360,7 +360,7 @@ describe('typed AxisNow API', () => {
         lastHealthState: 'partial',
         probeTemplateUuid: providerUuid,
         probeState: 'healthy',
-        probeStatuses: [{ address: '192.0.2.10', status: 'available', avgConnectLatency: 12 }],
+        probeStatuses: [{ address: '192.0.2.10', status: 'available' }],
         logs: [{ id: 9, action: 'tide', status: 'success', createdAt: '2026-09-10 06:00:00' }],
       },
     })
