@@ -100,14 +100,14 @@ describe('typed AxisNow API', () => {
           pool_summary: '1 个 EIP',
           pool_groups: [{ type: 'eip', type_name: 'EIP', count: 1, items: ['192.0.2.10'] }],
           pool_addresses: [
-            { address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false, country_code: 'CN', region_code: 'HK', isp_name: '测试线路', provider_name: '测试提供商', tag_names: ['edge.test'] },
+            { address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false, country_code: 'CN', province_code: '910000', isp_name: '测试线路', provider_name: '测试提供商', tag_names: ['edge.test'] },
             { address: '192.0.2.11', score: 72.5, status: 'available', quality_filtered: false, country_code: 'SG', tag_names: [] },
           ],
           pool_address_count: 2,
           pool_truncated: false,
           strategy_quantity: 1,
           strategy_interval: 5,
-          resolved_addresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false, country_code: 'CN', region_code: 'HK', isp_name: '测试线路', provider_name: '测试提供商', tag_names: ['edge.test'] }],
+          resolved_addresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', quality_filtered: false, country_code: 'CN', province_code: '910000', isp_name: '测试线路', provider_name: '测试提供商', tag_names: ['edge.test'] }],
           probe_template_uuid: providerUuid,
           probe_state: 'healthy',
           probe_statuses: [{ address: '192.0.2.10', status: 'available' }],
@@ -179,12 +179,12 @@ describe('typed AxisNow API', () => {
         poolAddressCount: 2,
         poolGroups: [{ type: 'eip', typeName: 'EIP', count: 1, items: ['192.0.2.10'] }],
         poolAddresses: [
-          { address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false, countryCode: 'CN', provinceCode: 'HK', ispName: '测试线路', providerName: '测试提供商', tagNames: ['edge.test'] },
+          { address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false, countryCode: 'CN', provinceCode: '910000', ispName: '测试线路', providerName: '测试提供商', tagNames: ['edge.test'] },
           { address: '192.0.2.11', score: 72.5, status: 'available', qualityFiltered: false, countryCode: 'SG', tagNames: [] },
         ],
         strategyQuantity: 1,
         strategyInterval: 5,
-        resolvedAddresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false, countryCode: 'CN', provinceCode: 'HK', ispName: '测试线路', providerName: '测试提供商', tagNames: ['edge.test'] }],
+        resolvedAddresses: [{ address: '192.0.2.10', score: 98.25, status: 'available', qualityFiltered: false, countryCode: 'CN', provinceCode: '910000', ispName: '测试线路', providerName: '测试提供商', tagNames: ['edge.test'] }],
         probeTemplateUuid: providerUuid,
         probeState: 'healthy',
         probeStatuses: [{ address: '192.0.2.10', status: 'available' }],
@@ -284,11 +284,11 @@ describe('typed AxisNow API', () => {
     expect(updated.json()).toEqual({ code: 'OK', message: '标签修改成功' })
   })
 
-  it('normalizes AxisNow second-level geo fields for Hong Kong, Macao and Taiwan', async () => {
+  it('preserves AxisNow province codes for Hong Kong, Macao and Taiwan', async () => {
     const rows = [
-      { uuid: eipUuid, address: '192.0.2.10', geo: { country_code: 'CN', region_code: 'HK' } },
-      { uuid: '46bc8942-cb3d-41c0-8fba-4dcf18f284d7', address: '192.0.2.11', geo: { country_code: 'CN', region: { code: 'CN', name: 'Macao' } } },
-      { uuid: '56bc8942-cb3d-41c0-8fba-4dcf18f284d7', address: '192.0.2.12', geo: { country_code: 'CN', subdivision_code: 'TW' } },
+      { uuid: eipUuid, address: '192.0.2.10', geo: { country_code: 'CN', province_code: '910000' } },
+      { uuid: '46bc8942-cb3d-41c0-8fba-4dcf18f284d7', address: '192.0.2.11', geo: { country_code: 'CN', province_code: '920000' } },
+      { uuid: '56bc8942-cb3d-41c0-8fba-4dcf18f284d7', address: '192.0.2.12', geo: { country_code: 'CN', province_code: '710000' } },
     ]
     const app = await appWith((url) => {
       if (url.pathname === '/internal/axisnow/eips/data') return json({ code: 0, total: rows.length, rows })
@@ -299,9 +299,9 @@ describe('typed AxisNow API', () => {
     expect(eips.json()).toMatchObject({
       code: 'OK',
       data: [
-        { geo: { countryCode: 'CN', provinceCode: 'HK' } },
-        { geo: { countryCode: 'CN', provinceCode: 'Macao' } },
-        { geo: { countryCode: 'CN', provinceCode: 'TW' } },
+        { geo: { countryCode: 'CN', provinceCode: '910000' } },
+        { geo: { countryCode: 'CN', provinceCode: '920000' } },
+        { geo: { countryCode: 'CN', provinceCode: '710000' } },
       ],
     })
   })

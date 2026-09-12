@@ -171,9 +171,9 @@ function geoFieldValue(geo: LegacyObject, keys: readonly string[]): string | und
 
 function isSpecialRegionValue(value: string): boolean {
   const normalized = value.trim().toLowerCase().replace(/[\s_./-]+/g, '')
-  return normalized === 'hk' || normalized === 'hkg' || normalized === 'hongkong' || normalized === '香港' || normalized === '810' || normalized.includes('hongkong')
-    || normalized === 'mo' || normalized === 'mac' || normalized === 'macao' || normalized === 'macau' || normalized === '澳门' || normalized === '446' || normalized.includes('macao') || normalized.includes('macau')
-    || normalized === 'tw' || normalized === 'twn' || normalized === 'taiwan' || normalized === '台湾' || normalized === '158' || normalized.includes('taiwan')
+  return normalized === 'hk' || normalized === 'hkg' || normalized === 'hongkong' || normalized === '香港' || normalized === '91' || normalized === '910000' || normalized.includes('hongkong')
+    || normalized === 'mo' || normalized === 'mac' || normalized === 'macao' || normalized === 'macau' || normalized === '澳门' || normalized === '92' || normalized === '920000' || normalized.includes('macao') || normalized.includes('macau')
+    || normalized === 'tw' || normalized === 'twn' || normalized === 'taiwan' || normalized === '台湾' || normalized === '71' || normalized === '710000' || normalized.includes('taiwan')
     || normalized.endsWith('hk') || normalized.endsWith('mo') || normalized.endsWith('tw')
 }
 
