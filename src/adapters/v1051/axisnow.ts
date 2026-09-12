@@ -128,6 +128,16 @@ export const AxisNowTagMutationSchema = z.object({
 
 type LegacyObject = Record<string, unknown>
 
+const geoCountryKeys = ['country_code', 'countryCode', 'country'] as const
+const geoProvinceKeys = [
+  'province_code', 'provinceCode',
+  'region_code', 'regionCode',
+  'subdivision_code', 'subdivisionCode',
+  'state_code', 'stateCode',
+  'province', 'region', 'subdivision', 'state',
+] as const
+const geoValueKeys = ['code', 'value', 'id', 'name', 'label'] as const
+
 function objectValue(value: unknown): LegacyObject | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as LegacyObject
@@ -138,6 +148,64 @@ function stringValue(value: unknown): string | undefined {
   if (typeof value === 'string') return value.trim() ? value.trim() : undefined
   if (typeof value === 'number' || typeof value === 'bigint') return String(value)
   return undefined
+}
+
+function nestedStringValues(value: unknown): string[] {
+  const direct = stringValue(value)
+  if (direct) return [direct]
+  const object = objectValue(value)
+  if (!object) return []
+  return geoValueKeys.flatMap((key) => {
+    const nested = stringValue(object[key])
+    return nested ? [nested] : []
+  })
+}
+
+function geoFieldValues(geo: LegacyObject, keys: readonly string[]): string[] {
+  return keys.flatMap((key) => nestedStringValues(geo[key]))
+}
+
+function geoFieldValue(geo: LegacyObject, keys: readonly string[]): string | undefined {
+  return geoFieldValues(geo, keys)[0]
+}
+
+function isSpecialRegionValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/[\s_./-]+/g, '')
+  return normalized === 'hk' || normalized === 'hkg' || normalized === 'hongkong' || normalized === '香港' || normalized === '810' || normalized.includes('hongkong')
+    || normalized === 'mo' || normalized === 'mac' || normalized === 'macao' || normalized === 'macau' || normalized === '澳门' || normalized === '446' || normalized.includes('macao') || normalized.includes('macau')
+    || normalized === 'tw' || normalized === 'twn' || normalized === 'taiwan' || normalized === '台湾' || normalized === '158' || normalized.includes('taiwan')
+    || normalized.endsWith('hk') || normalized.endsWith('mo') || normalized.endsWith('tw')
+}
+
+function geoProvinceValue(geo: LegacyObject): string | undefined {
+  const values = geoFieldValues(geo, geoProvinceKeys)
+  return values.find(isSpecialRegionValue) ?? values[0]
+}
+
+function geoFieldValueFromNested(geo: LegacyObject, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = nestedStringValues(geo[key])[0]
+    if (value) return value
+  }
+  return undefined
+}
+
+function normalizeGeo(value: unknown): { countryCode?: string; provinceCode?: string; cityName?: string; ispName?: string } {
+  const geo = objectValue(value) ?? {}
+  const nested = [geo.geo, geo.location, geo.address, geo.region_info, geo.subdivision_info]
+    .map((item) => objectValue(item))
+    .find((item): item is LegacyObject => Boolean(item))
+  const countryCode = geoFieldValue(geo, geoCountryKeys) ?? (nested ? geoFieldValue(nested, geoCountryKeys) : undefined)
+  const provinceCandidates = [geoProvinceValue(geo), nested ? geoProvinceValue(nested) : undefined].filter((item): item is string => Boolean(item))
+  const provinceCode = provinceCandidates.find(isSpecialRegionValue) ?? provinceCandidates[0]
+  const cityName = geoFieldValueFromNested(geo, ['city_name', 'cityName', 'city']) ?? (nested ? geoFieldValueFromNested(nested, ['city_name', 'cityName', 'city']) : undefined)
+  const ispName = geoFieldValueFromNested(geo, ['isp_name', 'ispName', 'isp']) ?? (nested ? geoFieldValueFromNested(nested, ['isp_name', 'ispName', 'isp']) : undefined)
+  return {
+    ...(countryCode ? { countryCode } : {}),
+    ...(provinceCode ? { provinceCode } : {}),
+    ...(cityName ? { cityName } : {}),
+    ...(ispName ? { ispName } : {}),
+  }
 }
 
 function numberValue(value: unknown, fallback = 0): number {
@@ -308,17 +376,16 @@ function normalizeRule(value: unknown): AxisNowRule {
       if (!address || !addressValue) return []
       const score = optionalNumberValue(address.score)
       const addressStatus = stringValue(address.status)
-      const countryCode = stringValue(address.country_code)
-      const provinceCode = stringValue(address.province_code)
-      const ispName = stringValue(address.isp_name)
+      const addressGeo = normalizeGeo(address)
+      const ispName = addressGeo.ispName
       const providerName = stringValue(address.provider_name)
       return [{
         address: addressValue,
         ...(score !== undefined ? { score } : {}),
         ...(addressStatus ? { status: addressStatus } : {}),
         qualityFiltered: booleanValue(address.quality_filtered),
-        ...(countryCode ? { countryCode } : {}),
-        ...(provinceCode ? { provinceCode } : {}),
+        ...(addressGeo.countryCode ? { countryCode: addressGeo.countryCode } : {}),
+        ...(addressGeo.provinceCode ? { provinceCode: addressGeo.provinceCode } : {}),
         ...(ispName ? { ispName } : {}),
         ...(providerName ? { providerName } : {}),
         tagNames: stringList(address.tag_names),
@@ -430,16 +497,12 @@ function normalizeAutomation(value: unknown): AxisNowRuleAutomation {
 function normalizeEip(value: unknown): AxisNowEip {
   const row = objectValue(value)
   if (!row) throw new ApiError(502, 'UPSTREAM_INVALID_AXISNOW_EIP', '原 dnsmgr 返回了无法识别的 AxisNow EIP')
-  const geo = objectValue(row.geo) ?? {}
+  const geo = normalizeGeo(row.geo ?? row)
   const edgeUuid = stringValue(row.edge_uuid)
   const clusterUuid = stringValue(row.cluster_uuid)
   const subscriptionStatus = stringValue(row.subscription_status)
   const createdAt = stringValue(row.created_at)
   const updatedAt = stringValue(row.updated_at)
-  const countryCode = stringValue(geo.country_code)
-  const provinceCode = stringValue(geo.province_code)
-  const cityName = stringValue(geo.city_name)
-  const ispName = stringValue(geo.isp_name)
   return {
     uuid: requiredString(row.uuid, 'AxisNow EIP 缺少 UUID'),
     accountId: numberValue(row.account_id),
@@ -454,12 +517,7 @@ function normalizeEip(value: unknown): AxisNowEip {
     tagNames: stringList(row.tag_names),
     referencedCount: numberValue(row.routing_referenced_count),
     providerName: stringValue(row.provider_name) ?? '-',
-    geo: {
-      ...(countryCode ? { countryCode } : {}),
-      ...(provinceCode ? { provinceCode } : {}),
-      ...(cityName ? { cityName } : {}),
-      ...(ispName ? { ispName } : {}),
-    },
+    geo,
     ...(subscriptionStatus ? { subscriptionStatus } : {}),
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
