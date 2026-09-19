@@ -39,17 +39,19 @@ const DCV_DELEGATION_DEFAULTS: CertificateSettings['dcvDelegation'] = {
   forceTargetRecordNameTemplate: false,
 }
 
-const ConfigKeys = {
-  localDefaultMode: 'helper_cert_local_default_mode',
-  localPemCertificatePathTemplate: 'helper_cert_local_pem_cert_path_template',
-  localPemPrivateKeyPathTemplate: 'helper_cert_local_pem_key_path_template',
-  localPfxPathTemplate: 'helper_cert_local_pfx_path_template',
-  localCommandTemplate: 'helper_cert_local_command_template',
-  dcvAllowedDomains: 'helper_cert_dcv_allowed_domains',
-  dcvDomainMatchMode: 'helper_cert_dcv_domain_match_mode',
-  dcvTargetRecordNameTemplate: 'helper_cert_dcv_target_record_name_template',
-  dcvForceTargetRecordNameTemplate: 'helper_cert_dcv_force_target_record_name_template',
+export const CertificateAutomationConfigKeys = {
+  localDefaultMode: 'helper_cert_local_mode',
+  localPemCertificatePathTemplate: 'helper_cert_local_pem_cert',
+  localPemPrivateKeyPathTemplate: 'helper_cert_local_pem_key',
+  localPfxPathTemplate: 'helper_cert_local_pfx_path',
+  localCommandTemplate: 'helper_cert_local_command',
+  dcvAllowedDomains: 'helper_cert_dcv_domains',
+  dcvDomainMatchMode: 'helper_cert_dcv_match_mode',
+  dcvTargetRecordNameTemplate: 'helper_cert_dcv_target_name',
+  dcvForceTargetRecordNameTemplate: 'helper_cert_dcv_force_target',
 } as const
+
+const ConfigKeys = CertificateAutomationConfigKeys
 
 export type ConfigValueReader = {
   getConfigValues(keys: string[]): Promise<Record<string, string>>

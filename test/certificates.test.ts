@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildApp } from '../src/app.js'
 import { resolveDcvTargetRecordName } from '../src/adapters/v1051/certificate-cnames.js'
-import { getCertificateAutomationSettings } from '../src/adapters/v1051/certificate-settings.js'
+import {
+  CertificateAutomationConfigKeys,
+  getCertificateAutomationSettings,
+} from '../src/adapters/v1051/certificate-settings.js'
 import { parseConfig } from '../src/config.js'
 import type { FetchLike } from '../src/upstream/client.js'
 
@@ -53,15 +56,19 @@ function form(init: RequestInit) {
 const headers = { cookie: 'user_token=legacy-certificate-session' }
 
 describe('typed certificate API', () => {
+  it('keeps helper setting keys within the dnsmgr config table limit', () => {
+    expect(Object.values(CertificateAutomationConfigKeys).every((key) => key.length <= 32)).toBe(true)
+  })
+
   it('loads helper certificate policies and enforces DCV domain and record templates', async () => {
     const settings = await getCertificateAutomationSettings({
       getConfigValues: async () => ({
-        helper_cert_local_default_mode: 'custom',
-        helper_cert_local_pem_cert_path_template: '/srv/{domain}/cert.pem',
-        helper_cert_dcv_allowed_domains: '["example.com"]',
-        helper_cert_dcv_domain_match_mode: 'suffix',
-        helper_cert_dcv_target_record_name_template: '_acme-{domainWithDashes}',
-        helper_cert_dcv_force_target_record_name_template: '1',
+        helper_cert_local_mode: 'custom',
+        helper_cert_local_pem_cert: '/srv/{domain}/cert.pem',
+        helper_cert_dcv_domains: '["example.com"]',
+        helper_cert_dcv_match_mode: 'suffix',
+        helper_cert_dcv_target_name: '_acme-{domainWithDashes}',
+        helper_cert_dcv_force_target: '1',
       }),
     })
     expect(settings.localDeployment).toMatchObject({
@@ -442,15 +449,15 @@ describe('typed certificate API', () => {
       if (url.pathname === '/internal/system/set') {
         expect(Object.fromEntries(form(init))).toEqual({
           cert_renewdays: '30', cert_notice_mail: '2', cert_notice_custom_webhook: '1',
-          helper_cert_local_default_mode: 'quick',
-          helper_cert_local_pem_cert_path_template: '/srv/certs/{domain}/fullchain.pem',
-          helper_cert_local_pem_key_path_template: '/srv/certs/{domain}/privkey.pem',
-          helper_cert_local_pfx_path_template: '/srv/certs/{domain}/certificate.pfx',
-          helper_cert_local_command_template: 'nginx -s reload',
-          helper_cert_dcv_allowed_domains: '["example.com"]',
-          helper_cert_dcv_domain_match_mode: 'suffix',
-          helper_cert_dcv_target_record_name_template: '{domainWithDashes}.cname',
-          helper_cert_dcv_force_target_record_name_template: '1',
+          helper_cert_local_mode: 'quick',
+          helper_cert_local_pem_cert: '/srv/certs/{domain}/fullchain.pem',
+          helper_cert_local_pem_key: '/srv/certs/{domain}/privkey.pem',
+          helper_cert_local_pfx_path: '/srv/certs/{domain}/certificate.pfx',
+          helper_cert_local_command: 'nginx -s reload',
+          helper_cert_dcv_domains: '["example.com"]',
+          helper_cert_dcv_match_mode: 'suffix',
+          helper_cert_dcv_target_name: '{domainWithDashes}.cname',
+          helper_cert_dcv_force_target: '1',
         })
         return json({ code: 0, msg: '设置保存成功' })
       }
