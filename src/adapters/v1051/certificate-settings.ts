@@ -10,6 +10,50 @@ import { namedElementAttribute } from './html-state.js'
 import { executeLegacyOperation } from './operations.js'
 
 const NotificationModeSchema = z.enum(['off', 'all', 'failures-only'])
+const LocalDeploymentModeSchema = z.enum(['quick', 'custom'])
+const DomainMatchModeSchema = z.enum(['exact', 'suffix'])
+const PathTemplateSchema = z.string().trim().min(1).max(4096)
+const CommandTemplateSchema = z.string().trim().max(4096)
+const AllowedDomainSchema = z.string().trim().toLowerCase().min(3).max(253).transform(
+  (value) => value.replace(/^\*\./, '').replace(/\.$/, ''),
+).refine((value) => value.includes('.') && !/[\s/:]/.test(value), '允许托管的域名格式不正确')
+const TargetRecordNameTemplateSchema = z.string().trim().min(1).max(253).superRefine((value, context) => {
+  const remaining = value.replaceAll('{domain}', '').replaceAll('{domainWithDashes}', '')
+  if (/[{}]/.test(remaining)) {
+    context.addIssue({ code: 'custom', message: '目标记录模板包含不支持的占位符' })
+  }
+})
+
+const LOCAL_DEPLOYMENT_DEFAULTS: CertificateSettings['localDeployment'] = {
+  defaultMode: 'quick',
+  pemCertificatePathTemplate: '/etc/ssl/{domain}/fullchain.pem',
+  pemPrivateKeyPathTemplate: '/etc/ssl/{domain}/privkey.pem',
+  pfxPathTemplate: '/etc/ssl/{domain}/certificate.pfx',
+  commandTemplate: '',
+}
+
+const DCV_DELEGATION_DEFAULTS: CertificateSettings['dcvDelegation'] = {
+  allowedDomains: [],
+  domainMatchMode: 'suffix',
+  targetRecordNameTemplate: '{domainWithDashes}.cname',
+  forceTargetRecordNameTemplate: false,
+}
+
+const ConfigKeys = {
+  localDefaultMode: 'helper_cert_local_default_mode',
+  localPemCertificatePathTemplate: 'helper_cert_local_pem_cert_path_template',
+  localPemPrivateKeyPathTemplate: 'helper_cert_local_pem_key_path_template',
+  localPfxPathTemplate: 'helper_cert_local_pfx_path_template',
+  localCommandTemplate: 'helper_cert_local_command_template',
+  dcvAllowedDomains: 'helper_cert_dcv_allowed_domains',
+  dcvDomainMatchMode: 'helper_cert_dcv_domain_match_mode',
+  dcvTargetRecordNameTemplate: 'helper_cert_dcv_target_record_name_template',
+  dcvForceTargetRecordNameTemplate: 'helper_cert_dcv_force_target_record_name_template',
+} as const
+
+export type ConfigValueReader = {
+  getConfigValues(keys: string[]): Promise<Record<string, string>>
+}
 
 const NotificationsSchema = z.object({
   email: NotificationModeSchema.optional(),
@@ -26,6 +70,22 @@ export const CertificateSettingsMutationSchema = z.object({
     endHour: z.coerce.number().int().min(0).max(23),
   }).strict().optional(),
   notifications: NotificationsSchema.optional(),
+  localDeployment: z.object({
+    defaultMode: LocalDeploymentModeSchema,
+    pemCertificatePathTemplate: PathTemplateSchema,
+    pemPrivateKeyPathTemplate: PathTemplateSchema,
+    pfxPathTemplate: PathTemplateSchema,
+    commandTemplate: CommandTemplateSchema,
+  }).strict().optional(),
+  dcvDelegation: z.object({
+    allowedDomains: z.array(AllowedDomainSchema).max(1000).refine(
+      (domains) => new Set(domains).size === domains.length,
+      '允许托管的域名不能重复',
+    ),
+    domainMatchMode: DomainMatchModeSchema,
+    targetRecordNameTemplate: TargetRecordNameTemplateSchema,
+    forceTargetRecordNameTemplate: z.boolean(),
+  }).strict().optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, '至少需要提交一项证书设置')
 
 const ModeToCode = {
@@ -49,12 +109,64 @@ function notificationMode(value: string | undefined): CertificateNotificationMod
   throw new ApiError(502, 'UPSTREAM_ADAPTER_MISMATCH', '原 dnsmgr 的证书通知设置格式不兼容')
 }
 
+function allowedDomains(value: string | undefined): string[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (Array.isArray(parsed)) {
+      return Array.from(new Set(parsed.flatMap((item) => {
+        const result = AllowedDomainSchema.safeParse(item)
+        return result.success ? [result.data] : []
+      })))
+    }
+  } catch {
+    // Accept the line/comma format used by early helper builds.
+  }
+  return Array.from(new Set(value.split(/[\r\n,]+/).flatMap((item) => {
+    const result = AllowedDomainSchema.safeParse(item)
+    return result.success ? [result.data] : []
+  })))
+}
+
+export async function getCertificateAutomationSettings(
+  reader: ConfigValueReader,
+): Promise<Pick<CertificateSettings, 'localDeployment' | 'dcvDelegation'>> {
+  const values = await reader.getConfigValues(Object.values(ConfigKeys))
+  const localMode = LocalDeploymentModeSchema.safeParse(values[ConfigKeys.localDefaultMode])
+  const domainMatchMode = DomainMatchModeSchema.safeParse(values[ConfigKeys.dcvDomainMatchMode])
+  return {
+    localDeployment: {
+      defaultMode: localMode.success ? localMode.data : LOCAL_DEPLOYMENT_DEFAULTS.defaultMode,
+      pemCertificatePathTemplate: values[ConfigKeys.localPemCertificatePathTemplate]
+        || LOCAL_DEPLOYMENT_DEFAULTS.pemCertificatePathTemplate,
+      pemPrivateKeyPathTemplate: values[ConfigKeys.localPemPrivateKeyPathTemplate]
+        || LOCAL_DEPLOYMENT_DEFAULTS.pemPrivateKeyPathTemplate,
+      pfxPathTemplate: values[ConfigKeys.localPfxPathTemplate]
+        || LOCAL_DEPLOYMENT_DEFAULTS.pfxPathTemplate,
+      commandTemplate: values[ConfigKeys.localCommandTemplate]
+        ?? LOCAL_DEPLOYMENT_DEFAULTS.commandTemplate,
+    },
+    dcvDelegation: {
+      allowedDomains: allowedDomains(values[ConfigKeys.dcvAllowedDomains]),
+      domainMatchMode: domainMatchMode.success ? domainMatchMode.data : DCV_DELEGATION_DEFAULTS.domainMatchMode,
+      targetRecordNameTemplate: values[ConfigKeys.dcvTargetRecordNameTemplate]
+        || DCV_DELEGATION_DEFAULTS.targetRecordNameTemplate,
+      forceTargetRecordNameTemplate: values[ConfigKeys.dcvForceTargetRecordNameTemplate] === '1',
+    },
+  }
+}
+
 export async function getCertificateSettings(
   client: DnsmgrClient,
   config: AppConfig,
   context: RequestContext,
+  reader: ConfigValueReader,
 ): Promise<CertificateSettings> {
-  const html = requireUpstreamHtml(await client.getHtml('/cert/certset', context), config)
+  const [htmlResult, automation] = await Promise.all([
+    client.getHtml('/cert/certset', context),
+    getCertificateAutomationSettings(reader),
+  ])
+  const html = requireUpstreamHtml(htmlResult, config)
   return {
     renewBeforeDays: requiredInteger(
       namedElementAttribute(html, 'input', 'cert_renewdays', 'value'),
@@ -80,6 +192,7 @@ export async function getCertificateSettings(
       robotWebhook: notificationMode(namedElementAttribute(html, 'select', 'cert_notice_webhook', 'default')),
       customWebhook: notificationMode(namedElementAttribute(html, 'select', 'cert_notice_custom_webhook', 'default')),
     },
+    ...automation,
   }
 }
 
@@ -91,6 +204,8 @@ export async function updateCertificateSettings(
 ) {
   const body = CertificateSettingsMutationSchema.parse(rawBody)
   const notifications = body.notifications
+  const local = body.localDeployment
+  const dcv = body.dcvDelegation
   const result = await executeLegacyOperation(client, config, context, 'system.settings.update', {
     form: {
       ...(body.renewBeforeDays === undefined ? {} : { cert_renewdays: body.renewBeforeDays }),
@@ -107,6 +222,23 @@ export async function updateCertificateSettings(
       ...(notifications?.customWebhook === undefined
         ? {}
         : { cert_notice_custom_webhook: ModeToCode[notifications.customWebhook] }),
+      ...(local
+        ? {
+            [ConfigKeys.localDefaultMode]: local.defaultMode,
+            [ConfigKeys.localPemCertificatePathTemplate]: local.pemCertificatePathTemplate,
+            [ConfigKeys.localPemPrivateKeyPathTemplate]: local.pemPrivateKeyPathTemplate,
+            [ConfigKeys.localPfxPathTemplate]: local.pfxPathTemplate,
+            [ConfigKeys.localCommandTemplate]: local.commandTemplate,
+          }
+        : {}),
+      ...(dcv
+        ? {
+            [ConfigKeys.dcvAllowedDomains]: JSON.stringify(dcv.allowedDomains),
+            [ConfigKeys.dcvDomainMatchMode]: dcv.domainMatchMode,
+            [ConfigKeys.dcvTargetRecordNameTemplate]: dcv.targetRecordNameTemplate,
+            [ConfigKeys.dcvForceTargetRecordNameTemplate]: dcv.forceTargetRecordNameTemplate ? 1 : 0,
+          }
+        : {}),
     },
   })
   return operationMessage(result.message)

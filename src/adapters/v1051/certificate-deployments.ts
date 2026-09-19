@@ -68,7 +68,7 @@ export const CertificateDeploymentMutationSchema = z.object({
 export const CertificateDeploymentStatusSchema = z.object({ enabled: z.boolean() }).strict()
 export const CertificateDeploymentBatchSchema = z.object({
   ids: IdList,
-  action: z.enum(['delete', 'reset', 'enable', 'disable', 'assign-certificate']),
+  action: z.enum(['delete', 'reset', 'enable', 'disable', 'assign-certificate', 'process']),
   orderId: PositiveId.optional(),
 }).strict().superRefine((value, context) => {
   if (value.action === 'assign-certificate' && value.orderId === undefined) {
@@ -81,7 +81,7 @@ export const CertificateDeploymentProcessSchema = z.object({
 }).strict()
 
 type DeploymentAccountOption = { id: number; type: string; label: string }
-type DeploymentOrderOption = { id: number; label: string }
+type DeploymentOrderOption = { id: number; label: string; domain?: string }
 
 function accountOptionsFromHtml(html: string): DeploymentAccountOption[] {
   const select = /<select\b(?=[^>]*\bname\s*=\s*["']aid["'])[^>]*>([\s\S]*?)<\/select>/i.exec(html)?.[1]
@@ -98,7 +98,10 @@ function accountOptionsFromHtml(html: string): DeploymentAccountOption[] {
 function orderOptionsFromHtml(html: string): DeploymentOrderOption[] {
   return namedSelectOptions(html, 'oid').flatMap(({ value, label }) => {
     const id = Number(value)
-    return Number.isSafeInteger(id) && id > 0 && label ? [{ id, label }] : []
+    if (!Number.isSafeInteger(id) || id <= 0 || !label) return []
+    const summary = label.startsWith(`${id}_`) ? label.slice(String(id).length + 1) : label
+    const domain = summary.split('、', 1)[0]?.split('（', 1)[0]?.replace(/等\d+个域名$/, '').trim()
+    return [{ id, label, ...(domain ? { domain } : {}) }]
   })
 }
 
@@ -149,17 +152,17 @@ function normalizeCertificateDeployment(row: LegacyObject): CertificateDeploymen
   const id = requiredPositiveInteger(
     row.id,
     'UPSTREAM_INVALID_CERTIFICATE_DEPLOYMENT',
-    '原 dnsmgr 返回了无法识别的自动部署任务',
+    '原 dnsmgr 返回了无法识别的证书部署任务',
   )
   const accountId = requiredPositiveInteger(
     row.aid,
     'UPSTREAM_INVALID_CERTIFICATE_DEPLOYMENT',
-    '原 dnsmgr 返回了无法识别的自动部署任务',
+    '原 dnsmgr 返回了无法识别的证书部署任务',
   )
   const orderId = requiredPositiveInteger(
     row.oid,
     'UPSTREAM_INVALID_CERTIFICATE_DEPLOYMENT',
-    '原 dnsmgr 返回了无法识别的自动部署任务',
+    '原 dnsmgr 返回了无法识别的证书部署任务',
   )
   const accountType = stringValue(row.type) ?? 'unknown'
   const accountName = stringValue(row.aname)
@@ -221,7 +224,7 @@ export async function listCertificateDeployments(
     result,
     query.page,
     query.pageSize,
-    '原 dnsmgr 的自动部署任务列表格式不兼容',
+    '原 dnsmgr 的证书部署任务列表格式不兼容',
     normalizeCertificateDeployment,
   )
 }
@@ -254,26 +257,26 @@ export async function getCertificateDeployment(
     'info',
     /自动部署任务不存在/,
     'CERTIFICATE_DEPLOYMENT_NOT_FOUND',
-    '自动部署任务不存在',
+    '证书部署任务不存在',
   )
   const id = requiredPositiveInteger(
     info.id,
     'UPSTREAM_INVALID_CERTIFICATE_DEPLOYMENT',
-    '原 dnsmgr 返回了无法识别的自动部署任务',
+    '原 dnsmgr 返回了无法识别的证书部署任务',
   )
   const accountId = requiredPositiveInteger(
     info.aid,
     'UPSTREAM_INVALID_CERTIFICATE_DEPLOYMENT',
-    '原 dnsmgr 返回了无法识别的自动部署任务',
+    '原 dnsmgr 返回了无法识别的证书部署任务',
   )
   const orderId = requiredPositiveInteger(
     info.oid,
     'UPSTREAM_INVALID_CERTIFICATE_DEPLOYMENT',
-    '原 dnsmgr 返回了无法识别的自动部署任务',
+    '原 dnsmgr 返回了无法识别的证书部署任务',
   )
   const accountType = stringValue(info.type)
   if (!accountType) {
-    throw new ApiError(502, 'UPSTREAM_INVALID_CERTIFICATE_DEPLOYMENT', '原 dnsmgr 返回了无法识别的自动部署任务')
+    throw new ApiError(502, 'UPSTREAM_INVALID_CERTIFICATE_DEPLOYMENT', '原 dnsmgr 返回了无法识别的证书部署任务')
   }
   const remark = stringValue(info.remark)
   return {
@@ -281,7 +284,7 @@ export async function getCertificateDeployment(
     accountId,
     accountType,
     orderId,
-    config: parseConfigObject(info.config ?? {}, '自动部署任务配置不是有效 JSON'),
+    config: parseConfigObject(info.config ?? {}, '证书部署任务配置不是有效 JSON'),
     ...(remark ? { remark } : {}),
   }
 }
@@ -387,6 +390,36 @@ export async function batchOperateCertificateDeployments(
   rawBody: unknown,
 ) {
   const body = CertificateDeploymentBatchSchema.parse(rawBody)
+  if (body.action === 'process') {
+    let cursor = 0
+    let succeeded = 0
+    const failures: Array<{ id: number; message: string }> = []
+    const worker = async () => {
+      while (cursor < body.ids.length) {
+        const index = cursor
+        cursor += 1
+        const id = body.ids[index]
+        if (id === undefined) return
+        try {
+          await executeLegacyOperation(client, config, context, 'certificateDeployments.process', {
+            form: { id, reset: false },
+          })
+          succeeded += 1
+        } catch (error) {
+          failures.push({ id, message: error instanceof Error ? error.message : String(error) })
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(5, body.ids.length) }, worker))
+    if (succeeded === 0) {
+      throw new ApiError(502, 'CERTIFICATE_DEPLOYMENT_BATCH_FAILED', '所选证书部署任务均执行失败', { failures })
+    }
+    return {
+      message: failures.length
+        ? `已执行 ${succeeded} 个证书部署任务，${failures.length} 个失败`
+        : `已执行 ${succeeded} 个证书部署任务`,
+    }
+  }
   const act = body.action === 'enable'
     ? 'open'
     : body.action === 'disable'

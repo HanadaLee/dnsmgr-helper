@@ -192,7 +192,7 @@ describe('typed monitoring API', () => {
             did: '42', rr: 'www', recordid: 'r1', type: '2', main_value: '192.0.2.1',
             backup_value: '192.0.2.2', checktype: '1', checkurl: '', tcpport: '443', frequency: '10',
             cycle: '3', timeout: '5', proxy: '0', cdn: '1', remark: 'edge',
-            recordinfo: '{"Line":"0","LineName":"默认","TTL":600}',
+            recordinfo: '{"Type":"A","Line":"0","LineName":"默认","TTL":600}',
           })
         }
         if (url.pathname === '/internal/dmonitor/task/edit') expect(form.get('id')).toBe('7')
@@ -223,7 +223,7 @@ describe('typed monitoring API', () => {
       useProxy: false,
       enableCloudflareProxy: true,
       remark: 'edge',
-      record: { lineId: '0', lineLabel: '默认', ttl: 600 },
+      record: { type: 'A', lineId: '0', lineLabel: '默认', ttl: 600 },
     }
     const list = await app.inject({
       method: 'GET',
@@ -297,7 +297,7 @@ describe('typed schedule API', () => {
           expect(Object.fromEntries(form)).toEqual({
             did: '42', rr: 'www', recordid: 'r1', type: '1', cycle: '1', switchtype: '0',
             switchdate: '1', switchtime: '08:30', value: '192.0.2.9', line: '1', remark: 'weekly',
-            recordinfo: '{"Value":["192.0.2.1","192.0.2.2"],"Line":"0","LineName":"默认","TTL":600}',
+            recordinfo: '{"Type":"A","Value":["192.0.2.1","192.0.2.2"],"Line":"0","LineName":"默认","TTL":600}',
           })
         }
         if (url.pathname.endsWith('/edit')) expect(form.get('id')).toBe('5')
@@ -325,6 +325,7 @@ describe('typed schedule API', () => {
       lineMode: 'proxied',
       remark: 'weekly',
       record: {
+        type: 'A',
         value: '192.0.2.1,192.0.2.2', values: ['192.0.2.1', '192.0.2.2'],
         lineId: '0', lineLabel: '默认', ttl: 600,
       },

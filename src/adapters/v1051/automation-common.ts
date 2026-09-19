@@ -95,6 +95,7 @@ export function parseRecordSnapshot(value: unknown): DnsRecordSnapshot | undefin
   if (ttl === undefined || ttl < 0) return undefined
   const lineId = stringValue(record.Line) ?? ''
   const lineLabel = stringValue(record.LineName)
+  const type = stringValue(record.Type)
   const rawValues = Array.isArray(record.Value)
     ? record.Value.map(stringValue).filter((item): item is string => Boolean(item))
     : undefined
@@ -102,6 +103,7 @@ export function parseRecordSnapshot(value: unknown): DnsRecordSnapshot | undefin
   return {
     lineId,
     ttl,
+    ...(type ? { type } : {}),
     ...(lineLabel ? { lineLabel } : {}),
     ...(rawValue ? { value: rawValue } : {}),
     ...(rawValues?.length ? { values: rawValues } : {}),

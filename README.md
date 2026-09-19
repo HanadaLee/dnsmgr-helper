@@ -18,7 +18,7 @@
 - 解析线路、最小 TTL、供应商能力、分组、日志、权重和域名别名转换
 - DNS 监控概览、任务、通知、日志与进程状态的稳定类型化 API
 - 定时切换任务及 CF 优选 IP 设置、额度、任务和立即执行 API
-- 证书账户、订单、制品、自动部署、DCV 托管校验和证书计划设置的完整类型化 API
+- 证书账户、订单、制品、证书部署、DCV 托管校验和证书计划设置的完整类型化 API
 - 动态证书字段转换为结构化显示条件，列表凭据脱敏，日志文件标识和系统设置键严格校验
 - CloudFlare 自定义主机名、所有权/证书验证、Fallback、DCV 委派与批量操作 API
 - CloudFlare Tunnel、敏感令牌、Public Hostname、CIDR 和主机名路由的完整 API
@@ -202,7 +202,7 @@ docker build -t dnsmgr:local docker/dnsmgr
 | `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/optimize-ip...` | 优选 IP 设置、额度、状态与任务 |
 | `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/certificate-accounts...` | 签发与部署账户、类型和动态字段 |
 | `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/certificate-orders...` | 订单、续签、执行、日志和证书制品 |
-| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/certificate-deployments...` | 自动部署任务、批量操作和日志 |
+| `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/certificate-deployments...` | 证书部署任务、批量操作和日志 |
 | `GET/POST/PUT/DELETE` | `/api/web/v1/certificate-cnames...` | DCV 托管校验和立即验证 |
 | `GET/PUT` | `/api/web/v1/certificate-settings` | 自动续签、部署时段和通知设置 |
 | `GET/POST/PUT/PATCH/DELETE` | `/api/web/v1/axisnow...` | 平台账户、DNS 路由、线路规则、自动调度、EIP 和标签 |

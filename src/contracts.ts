@@ -119,7 +119,7 @@ export type UserFormOptions = {
 
 export type AuditLogEntry = {
   id: number
-  actor: { kind: 'administrator' } | { kind: 'user'; userId: number }
+  actor: { kind: 'administrator' } | { kind: 'user'; userId: number; username?: string }
   domain?: string
   action: string
   detail: string
@@ -376,6 +376,7 @@ export type AutomationDomainOption = {
 }
 
 export type DnsRecordSnapshot = {
+  type?: string
   lineId: string
   lineLabel?: string
   ttl: number
@@ -614,6 +615,19 @@ export type CertificateSettings = {
     telegram: CertificateNotificationMode
     robotWebhook: CertificateNotificationMode
     customWebhook: CertificateNotificationMode
+  }
+  localDeployment: {
+    defaultMode: 'quick' | 'custom'
+    pemCertificatePathTemplate: string
+    pemPrivateKeyPathTemplate: string
+    pfxPathTemplate: string
+    commandTemplate: string
+  }
+  dcvDelegation: {
+    allowedDomains: string[]
+    domainMatchMode: 'exact' | 'suffix'
+    targetRecordNameTemplate: string
+    forceTargetRecordNameTemplate: boolean
   }
 }
 

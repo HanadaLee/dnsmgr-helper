@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import type { AppConfig } from '../../config.js'
-import type { CertificateCnameProxy, PageMeta } from '../../contracts.js'
+import type { CertificateCnameProxy, CertificateSettings, PageMeta } from '../../contracts.js'
 import { ApiError } from '../../errors.js'
 import type { DnsmgrClient, RequestContext } from '../../upstream/client.js'
 import { requireUpstreamHtml } from '../../upstream/legacy.js'
@@ -56,6 +56,43 @@ export const CertificateCnameUpdateSchema = z.object({
   targetRecordName: RecordNameSchema,
   targetDomainId: PositiveId,
 }).strict()
+
+function normalizedDelegationDomain(value: string): string {
+  return value.trim().toLowerCase().replace(/^\*\./, '').replace(/\.$/, '')
+}
+
+export function renderDcvTargetRecordName(template: string, domain: string): string {
+  const normalized = normalizedDelegationDomain(domain)
+  return template
+    .replaceAll('{domainWithDashes}', normalized.replaceAll('.', '-'))
+    .replaceAll('{domain}', normalized)
+}
+
+function domainAllowed(
+  domain: string,
+  settings: CertificateSettings['dcvDelegation'],
+): boolean {
+  if (settings.allowedDomains.length === 0) return true
+  const normalized = normalizedDelegationDomain(domain)
+  return settings.allowedDomains.some((allowed) => {
+    const candidate = normalizedDelegationDomain(allowed)
+    return normalized === candidate
+      || (settings.domainMatchMode === 'suffix' && normalized.endsWith(`.${candidate}`))
+  })
+}
+
+export function resolveDcvTargetRecordName(
+  domain: string,
+  requestedRecordName: string,
+  settings: CertificateSettings['dcvDelegation'],
+): string {
+  if (!domainAllowed(domain, settings)) {
+    throw new ApiError(422, 'DCV_DOMAIN_NOT_ALLOWED', '该证书域名不在允许托管的域名范围内')
+  }
+  return settings.forceTargetRecordNameTemplate
+    ? RecordNameSchema.parse(renderDcvTargetRecordName(settings.targetRecordNameTemplate, domain))
+    : requestedRecordName
+}
 
 function normalizeCertificateCname(row: LegacyObject): CertificateCnameProxy {
   const id = requiredPositiveInteger(
@@ -134,10 +171,12 @@ export async function createCertificateCname(
   config: AppConfig,
   context: RequestContext,
   rawBody: unknown,
+  settings: CertificateSettings['dcvDelegation'],
 ) {
   const body = CertificateCnameCreateSchema.parse(rawBody)
+  const targetRecordName = resolveDcvTargetRecordName(body.domain, body.targetRecordName, settings)
   const result = await executeLegacyOperation(client, config, context, 'certificateCnames.create', {
-    form: { domain: body.domain, rr: body.targetRecordName, did: body.targetDomainId },
+    form: { domain: body.domain, rr: targetRecordName, did: body.targetDomainId },
   })
   return operationMessage(result.message)
 }

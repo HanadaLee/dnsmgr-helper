@@ -85,6 +85,7 @@ import {
   updateCertificateOrder,
 } from './adapters/v1051/certificate-orders.js'
 import {
+  getCertificateAutomationSettings,
   getCertificateSettings,
   updateCertificateSettings,
 } from './adapters/v1051/certificate-settings.js'
@@ -1653,7 +1654,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   app.post('/api/web/v1/certificate-cnames', async (request) => ({
     code: 'OK',
-    ...await createCertificateCname(client, config, upstreamContext(request, config), request.body),
+    ...await createCertificateCname(
+      client,
+      config,
+      upstreamContext(request, config),
+      request.body,
+      (await getCertificateAutomationSettings(database)).dcvDelegation,
+    ),
   }))
 
   app.put('/api/web/v1/certificate-cnames/:cnameId', async (request) => {
@@ -1688,7 +1695,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   app.get('/api/web/v1/certificate-settings', async (request) => ({
     code: 'OK',
-    data: await getCertificateSettings(client, config, upstreamContext(request, config)),
+    data: await getCertificateSettings(client, config, upstreamContext(request, config), database),
   }))
 
   app.put('/api/web/v1/certificate-settings', async (request) => ({

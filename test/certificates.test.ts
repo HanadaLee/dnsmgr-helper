@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildApp } from '../src/app.js'
+import { resolveDcvTargetRecordName } from '../src/adapters/v1051/certificate-cnames.js'
+import { getCertificateAutomationSettings } from '../src/adapters/v1051/certificate-settings.js'
 import { parseConfig } from '../src/config.js'
 import type { FetchLike } from '../src/upstream/client.js'
 
@@ -51,6 +53,33 @@ function form(init: RequestInit) {
 const headers = { cookie: 'user_token=legacy-certificate-session' }
 
 describe('typed certificate API', () => {
+  it('loads helper certificate policies and enforces DCV domain and record templates', async () => {
+    const settings = await getCertificateAutomationSettings({
+      getConfigValues: async () => ({
+        helper_cert_local_default_mode: 'custom',
+        helper_cert_local_pem_cert_path_template: '/srv/{domain}/cert.pem',
+        helper_cert_dcv_allowed_domains: '["example.com"]',
+        helper_cert_dcv_domain_match_mode: 'suffix',
+        helper_cert_dcv_target_record_name_template: '_acme-{domainWithDashes}',
+        helper_cert_dcv_force_target_record_name_template: '1',
+      }),
+    })
+    expect(settings.localDeployment).toMatchObject({
+      defaultMode: 'custom',
+      pemCertificatePathTemplate: '/srv/{domain}/cert.pem',
+    })
+    expect(resolveDcvTargetRecordName(
+      'www.example.com',
+      'ignored',
+      settings.dcvDelegation,
+    )).toBe('_acme-www-example-com')
+    expect(() => resolveDcvTargetRecordName(
+      'outside.example.net',
+      'requested',
+      settings.dcvDelegation,
+    )).toThrow('不在允许托管的域名范围内')
+  })
+
   it('discovers the AxisNow deployment account definition and its numeric options', async () => {
     const app = await appWith((url, init) => {
       if (url.pathname === '/internal/cert/account/add' && init.method === 'GET') {
@@ -347,7 +376,7 @@ describe('typed certificate API', () => {
       if (url.pathname === '/internal/cert/deploy/add' && init.method === 'GET') {
         return html(`<select name="aid"><option value="">请选择</option><option value="4" data-type="nginx">4_Nginx</option></select>
           <select name="oid"><option value="9">9_example.com（ACME）</option></select>
-          <script>var info=null; var typeList={"nginx":{"name":"Nginx","taskinputs":{"path":{"name":"证书路径","type":"input","required":true}},"tasknote":"重新加载服务"}};</script>`)
+          <script>var info=null; var typeList={"nginx":{"name":"Nginx","taskinputs":{"path":{"name":"证书路径","type":"input","required":true},"pem_key_file":{"name":"私钥保存路径","type":"input","required":true}},"tasknote":"重新加载服务"}};</script>`)
       }
       if (url.pathname === '/internal/cert/deploy/edit' && init.method === 'GET') {
         return html(`<script>var info={"id":11,"aid":4,"oid":9,"type":"nginx","config":"{\\"path\\":\\"/etc/nginx/cert.pem\\"}","remark":"edge"};</script>`)
@@ -382,7 +411,7 @@ describe('typed certificate API', () => {
           expect(values.get('certid')).toBe('10')
         }
         if (url.pathname.endsWith('/setactive')) expect(values.get('active')).toBe('0')
-        if (url.pathname.endsWith('/process')) expect(values.get('reset')).toBe('1')
+        if (url.pathname.endsWith('/process')) expect(['0', '1']).toContain(values.get('reset'))
         return json({ code: 0, msg: '部署操作成功' })
       }
       if (url.pathname === '/internal/cert/cname' && init.method === 'GET') {
@@ -413,6 +442,15 @@ describe('typed certificate API', () => {
       if (url.pathname === '/internal/system/set') {
         expect(Object.fromEntries(form(init))).toEqual({
           cert_renewdays: '30', cert_notice_mail: '2', cert_notice_custom_webhook: '1',
+          helper_cert_local_default_mode: 'quick',
+          helper_cert_local_pem_cert_path_template: '/srv/certs/{domain}/fullchain.pem',
+          helper_cert_local_pem_key_path_template: '/srv/certs/{domain}/privkey.pem',
+          helper_cert_local_pfx_path_template: '/srv/certs/{domain}/certificate.pfx',
+          helper_cert_local_command_template: 'nginx -s reload',
+          helper_cert_dcv_allowed_domains: '["example.com"]',
+          helper_cert_dcv_domain_match_mode: 'suffix',
+          helper_cert_dcv_target_record_name_template: '{domainWithDashes}.cname',
+          helper_cert_dcv_force_target_record_name_template: '1',
         })
         return json({ code: 0, msg: '设置保存成功' })
       }
@@ -450,6 +488,10 @@ describe('typed certificate API', () => {
         payload: { ids: [11, 12], action: 'assign-certificate', orderId: 10 },
       }),
     ])
+    const batchProcess = await app.inject({
+      method: 'POST', url: '/api/web/v1/certificate-deployments/batch', headers,
+      payload: { ids: [11, 12], action: 'process' },
+    })
 
     expect(deploymentList.json()).toMatchObject({
       code: 'OK',
@@ -463,8 +505,15 @@ describe('typed certificate API', () => {
       code: 'OK',
       data: {
         accounts: [{ id: 4, type: 'nginx', label: '4_Nginx' }],
-        orders: [{ id: 9, label: '9_example.com（ACME）' }],
-        accountTypes: [{ type: 'nginx', taskFields: [{ key: 'path', required: true }], taskNote: '重新加载服务' }],
+        orders: [{ id: 9, label: '9_example.com（ACME）', domain: 'example.com' }],
+        accountTypes: [{
+          type: 'nginx',
+          taskFields: [
+            { key: 'path', required: true },
+            { key: 'pem_key_file', required: true, sensitive: false },
+          ],
+          taskNote: '重新加载服务',
+        }],
       },
     })
     expect(deploymentDetail.json()).toEqual({
@@ -477,6 +526,7 @@ describe('typed certificate API', () => {
     deploymentResponses.forEach((response) => {
       expect(response.json()).toEqual({ code: 'OK', message: '部署操作成功' })
     })
+    expect(batchProcess.json()).toEqual({ code: 'OK', message: '已执行 2 个证书部署任务' })
 
     const cnameForm = await app.inject({ method: 'GET', url: '/api/web/v1/certificate-cnames/form', headers })
     const cnameList = await app.inject({
@@ -507,6 +557,19 @@ describe('typed certificate API', () => {
       payload: {
         renewBeforeDays: 30,
         notifications: { email: 'failures-only', customWebhook: 'all' },
+        localDeployment: {
+          defaultMode: 'quick',
+          pemCertificatePathTemplate: '/srv/certs/{domain}/fullchain.pem',
+          pemPrivateKeyPathTemplate: '/srv/certs/{domain}/privkey.pem',
+          pfxPathTemplate: '/srv/certs/{domain}/certificate.pfx',
+          commandTemplate: 'nginx -s reload',
+        },
+        dcvDelegation: {
+          allowedDomains: ['example.com'],
+          domainMatchMode: 'suffix',
+          targetRecordNameTemplate: '{domainWithDashes}.cname',
+          forceTargetRecordNameTemplate: true,
+        },
       },
     })
     expect(settings.json()).toEqual({
@@ -516,10 +579,23 @@ describe('typed certificate API', () => {
         notifications: {
           email: 'all', wechat: 'off', telegram: 'failures-only', robotWebhook: 'all', customWebhook: 'off',
         },
+        localDeployment: {
+          defaultMode: 'quick',
+          pemCertificatePathTemplate: '/etc/ssl/{domain}/fullchain.pem',
+          pemPrivateKeyPathTemplate: '/etc/ssl/{domain}/privkey.pem',
+          pfxPathTemplate: '/etc/ssl/{domain}/certificate.pfx',
+          commandTemplate: '',
+        },
+        dcvDelegation: {
+          allowedDomains: [],
+          domainMatchMode: 'suffix',
+          targetRecordNameTemplate: '{domainWithDashes}.cname',
+          forceTargetRecordNameTemplate: false,
+        },
       },
     })
     expect(settingsUpdate.json()).toEqual({ code: 'OK', message: '设置保存成功' })
-    expect(deploymentActions).toHaveLength(7)
+    expect(deploymentActions).toHaveLength(9)
     expect(cnameActions).toHaveLength(4)
   })
 })

@@ -4,7 +4,7 @@ import type { AppConfig } from '../../config.js'
 import type { AuditLogEntry, PageMeta } from '../../contracts.js'
 import { ApiError } from '../../errors.js'
 import type { DnsmgrClient, RequestContext } from '../../upstream/client.js'
-import { integerValue, pagedOperation, stringValue } from './automation-common.js'
+import { integerValue, pagedOperation, rowsFromOperation, stringValue } from './automation-common.js'
 import { plainText } from './html-state.js'
 import { executeLegacyOperation } from './operations.js'
 
@@ -52,5 +52,25 @@ export async function listAuditLogs(
       ...(query.q ? { kw: query.q } : {}),
     },
   })
-  return pagedOperation(result, query.page, query.pageSize, '原 dnsmgr 操作日志格式不兼容', normalizeLog)
+  const page = pagedOperation(result, query.page, query.pageSize, '原 dnsmgr 操作日志格式不兼容', normalizeLog)
+  const userIds = new Set(page.data.flatMap((entry) => entry.actor.kind === 'user' ? [entry.actor.userId] : []))
+  if (userIds.size === 0) return page
+
+  const users = await executeLegacyOperation(client, config, context, 'users.list', {
+    form: { offset: 0, limit: 10_000, sortName: 'id', sortOrder: 'asc' },
+  })
+  const usernames = new Map<number, string>()
+  for (const row of rowsFromOperation(users, '原 dnsmgr 用户列表格式不兼容')) {
+    const id = integerValue(row.id)
+    const username = stringValue(row.username)
+    if (id !== undefined && username && userIds.has(id)) usernames.set(id, username)
+  }
+  return {
+    ...page,
+    data: page.data.map((entry) => {
+      if (entry.actor.kind !== 'user') return entry
+      const username = usernames.get(entry.actor.userId)
+      return { ...entry, actor: { ...entry.actor, ...(username ? { username } : {}) } }
+    }),
+  }
 }

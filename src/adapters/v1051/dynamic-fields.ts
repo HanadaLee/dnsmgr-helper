@@ -64,6 +64,7 @@ export function safeIcon(value: unknown): string | undefined {
 
 function sensitiveField(key: string, label: string): boolean {
   const name = `${key} ${label}`.toLowerCase()
+  if (/(^|[_\s-])(path|file)([_\s-]|$)|路径|文件/.test(name)) return false
   return /(secret|password|passwd|token|private|credential|密码|密钥|私钥)/.test(name)
     || /(^|[_\s-])(api[_\s-]?key|sk)([_\s-]|$)/.test(name)
 }

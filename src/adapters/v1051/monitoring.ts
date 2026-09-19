@@ -80,6 +80,7 @@ export const MonitoringTasksQuerySchema = z.object({
 }).strict()
 
 const RecordSnapshotSchema = z.object({
+  type: z.string().trim().min(1).max(64).optional(),
   lineId: z.string().trim().max(255),
   lineLabel: z.string().trim().max(255).optional(),
   ttl: z.coerce.number().int().min(0).max(2_147_483_647),
@@ -243,6 +244,7 @@ function monitoringTaskForm(rawBody: unknown) {
     cdn: body.enableCloudflareProxy,
     remark: body.remark ?? '',
     recordinfo: JSON.stringify({
+      Type: body.record.type ?? '',
       Line: body.record.lineId,
       LineName: formValue(body.record.lineLabel),
       TTL: body.record.ttl,

@@ -144,7 +144,12 @@ describe('dashboard, users and logs', () => {
         ] })
       }
       if (url.pathname === '/internal/user/data') {
-        expect(Object.fromEntries(form(init))).toEqual({
+        const values = Object.fromEntries(form(init))
+        if (values.limit === '10000') {
+          expect(values).toEqual({ offset: '0', limit: '10000', sortName: 'id', sortOrder: 'asc' })
+          return json({ total: 1, rows: [{ id: 1001, username: 'hanada' }] })
+        }
+        expect(values).toEqual({
           offset: '0', limit: '10', sortName: 'username', sortOrder: 'asc', kw: 'hana',
         })
         return json({ total: 1, rows: [{
@@ -254,7 +259,7 @@ describe('dashboard, users and logs', () => {
     expect(logs.json()).toEqual({
       code: 'OK',
       data: [{
-        id: 7, actor: { kind: 'user', userId: 1001 }, domain: 'example.com',
+        id: 7, actor: { kind: 'user', userId: 1001, username: 'hanada' }, domain: 'example.com',
         action: '更新记录', detail: '值 <changed>', occurredAt: '2026-08-31 01:02:03',
       }],
       meta: { page: 1, pageSize: 10, total: 1 },
