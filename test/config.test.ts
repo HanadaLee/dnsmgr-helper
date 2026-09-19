@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { loadConfig } from '../src/config.js'
+import { loadConfig, parseConfig } from '../src/config.js'
 
 const temporaryDirectories: string[] = []
 
@@ -15,6 +15,17 @@ afterEach(async () => {
 })
 
 describe('ThinkPHP database configuration compatibility', () => {
+  it('uses the stock dnsmgr table prefix unless it is explicitly overridden', () => {
+    const base = {
+      server: { environment: 'test', publicUrl: 'https://dns.example.com/' },
+      upstream: { url: 'http://127.0.0.1:19101/' },
+      cas: { enabled: false },
+      legacySso: {},
+    }
+    expect(parseConfig({ ...base, database: { enabled: true } }).database.tablePrefix).toBe('dnsmgr_')
+    expect(parseConfig({ ...base, database: { enabled: true, tablePrefix: '' } }).database.tablePrefix).toBe('')
+  })
+
   it('loads database credentials from a relative read-only-compatible env path', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'dnsmgr-helper-config-'))
     temporaryDirectories.push(directory)

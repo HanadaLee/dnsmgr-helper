@@ -100,7 +100,7 @@ const ConfigSchema = z.object({
     password: z.string().default(''),
     name: z.string().min(1).default('dnsmgr'),
     charset: z.string().regex(/^[A-Za-z0-9_-]+$/).default('utf8mb4'),
-    tablePrefix: z.string().regex(/^[A-Za-z0-9_]*$/).default(''),
+    tablePrefix: z.string().regex(/^[A-Za-z0-9_]*$/).default('dnsmgr_'),
     connectionLimit: z.number().int().min(1).max(100).default(5),
     connectTimeoutMs: z.number().int().min(100).max(300_000).default(10_000),
     ssl: z.boolean().default(false),
