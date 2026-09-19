@@ -72,7 +72,6 @@ describe('typed certificate API', () => {
     }
     const result = CertificateSettingsMutationSchema.safeParse({
       localDeployment: {
-        defaultMode: 'quick',
         defaultTemplateId: 'missing',
         templates: [template, { ...template, id: 'two' }],
       },
@@ -90,7 +89,6 @@ describe('typed certificate API', () => {
   it('loads helper certificate policies and enforces DCV domain and record templates', async () => {
     const settings = await getCertificateAutomationSettings({
       getConfigValues: async () => ({
-        helper_cert_local_mode: 'custom',
         helper_cert_local_pem_cert: '/srv/{domain}/cert.pem',
         helper_cert_dcv_domains: '["example.com"]',
         helper_cert_dcv_match_mode: 'suffix',
@@ -99,7 +97,6 @@ describe('typed certificate API', () => {
       }),
     })
     expect(settings.localDeployment).toMatchObject({
-      defaultMode: 'custom',
       defaultTemplateId: 'default',
       templates: [{
         id: 'default',
@@ -152,7 +149,6 @@ describe('typed certificate API', () => {
     }]
     const settings = await getCertificateAutomationSettings({
       getConfigValues: async () => ({
-        helper_cert_local_mode: 'quick',
         helper_cert_local_default: 'origin',
         helper_cert_local_templates: JSON.stringify(localTemplates),
         helper_cert_dcv_default: 'public',
@@ -161,7 +157,6 @@ describe('typed certificate API', () => {
     })
 
     expect(settings.localDeployment).toEqual({
-      defaultMode: 'quick',
       defaultTemplateId: 'origin',
       templates: localTemplates,
     })
@@ -182,7 +177,13 @@ describe('typed certificate API', () => {
       'ignored',
       settings.dcvDelegation,
       'missing',
-    )).toThrow('所选 DCV 托管策略不存在')
+    )).toThrow('所选 DCV 模板不存在')
+    expect(resolveDcvTargetRecordName(
+      'outside.example.net',
+      'custom-record',
+      settings.dcvDelegation,
+      null,
+    )).toBe('custom-record')
   })
 
   it('discovers the AxisNow deployment account definition and its numeric options', async () => {
@@ -571,10 +572,10 @@ describe('typed certificate API', () => {
         const values = Object.fromEntries(form(init))
         expect(values).toMatchObject({
           cert_renewdays: '30', cert_notice_mail: '2', cert_notice_custom_webhook: '1',
-          helper_cert_local_mode: 'quick',
           helper_cert_local_default: 'local-default',
           helper_cert_dcv_default: 'dcv-default',
         })
+        expect(values).not.toHaveProperty('helper_cert_local_mode')
         expect(JSON.parse(values.helper_cert_local_templates!)).toEqual(localTemplates)
         expect(JSON.parse(values.helper_cert_dcv_templates!)).toEqual(dcvTemplates)
         return json({ code: 0, msg: '设置保存成功' })
@@ -660,7 +661,12 @@ describe('typed certificate API', () => {
     const cnameResponses = await Promise.all([
       app.inject({
         method: 'POST', url: '/api/web/v1/certificate-cnames', headers,
-        payload: { domain: 'external.example', targetRecordName: '_acme-proxy', targetDomainId: 42 },
+        payload: {
+          domain: 'external.example',
+          targetRecordName: '_acme-proxy',
+          targetDomainId: 42,
+          dcvTemplateId: null,
+        },
       }),
       app.inject({
         method: 'PUT', url: '/api/web/v1/certificate-cnames/13', headers,
@@ -683,7 +689,6 @@ describe('typed certificate API', () => {
         renewBeforeDays: 30,
         notifications: { email: 'failures-only', customWebhook: 'all' },
         localDeployment: {
-          defaultMode: 'quick',
           defaultTemplateId: 'local-default',
           templates: localTemplates,
         },
@@ -701,7 +706,6 @@ describe('typed certificate API', () => {
           email: 'all', wechat: 'off', telegram: 'failures-only', robotWebhook: 'all', customWebhook: 'off',
         },
         localDeployment: {
-          defaultMode: 'quick',
           defaultTemplateId: 'default',
           templates: [{
             id: 'default',
@@ -716,7 +720,7 @@ describe('typed certificate API', () => {
           defaultTemplateId: 'default',
           templates: [{
             id: 'default',
-            name: '默认策略',
+            name: '默认模板',
             allowedDomains: [],
             domainMatchMode: 'suffix',
             targetRecordNameTemplate: '{domainWithDashes}.cname',

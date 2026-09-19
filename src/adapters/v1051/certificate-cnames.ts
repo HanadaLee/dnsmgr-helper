@@ -56,7 +56,7 @@ export const CertificateCnameCreateSchema = z.object({
   domain: DomainNameSchema,
   targetRecordName: RecordNameSchema,
   targetDomainId: PositiveId,
-  dcvTemplateId: TemplateIdSchema.optional(),
+  dcvTemplateId: TemplateIdSchema.nullable().optional(),
 }).strict()
 
 export const CertificateCnameUpdateSchema = z.object({
@@ -90,12 +90,13 @@ function domainAllowed(
 
 function selectedDcvTemplate(
   settings: CertificateSettings['dcvDelegation'],
-  requestedTemplateId?: string,
-): CertificateDcvDelegationTemplate {
+  requestedTemplateId?: string | null,
+): CertificateDcvDelegationTemplate | undefined {
+  if (requestedTemplateId === null) return undefined
   const templateId = requestedTemplateId ?? settings.defaultTemplateId
   const template = settings.templates.find((candidate) => candidate.id === templateId)
   if (!template) {
-    throw new ApiError(422, 'DCV_TEMPLATE_NOT_FOUND', '所选 DCV 托管策略不存在')
+    throw new ApiError(422, 'DCV_TEMPLATE_NOT_FOUND', '所选 DCV 模板不存在')
   }
   return template
 }
@@ -104,9 +105,10 @@ export function resolveDcvTargetRecordName(
   domain: string,
   requestedRecordName: string,
   settings: CertificateSettings['dcvDelegation'],
-  requestedTemplateId?: string,
+  requestedTemplateId?: string | null,
 ): string {
   const template = selectedDcvTemplate(settings, requestedTemplateId)
+  if (!template) return requestedRecordName
   if (!domainAllowed(domain, template)) {
     throw new ApiError(422, 'DCV_DOMAIN_NOT_ALLOWED', '该证书域名不在允许托管的域名范围内')
   }

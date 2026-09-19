@@ -635,7 +635,6 @@ export type CertificateSettings = {
     customWebhook: CertificateNotificationMode
   }
   localDeployment: {
-    defaultMode: 'quick' | 'custom'
     defaultTemplateId: string
     templates: CertificateLocalDeploymentTemplate[]
   }

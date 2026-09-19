@@ -15,7 +15,6 @@ import { namedElementAttribute } from './html-state.js'
 import { executeLegacyOperation } from './operations.js'
 
 const NotificationModeSchema = z.enum(['off', 'all', 'failures-only'])
-const LocalDeploymentModeSchema = z.enum(['quick', 'custom'])
 const DomainMatchModeSchema = z.enum(['exact', 'suffix'])
 const TemplateIdSchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
 const TemplateNameSchema = z.string().trim().min(1).max(64)
@@ -73,7 +72,6 @@ function validateTemplateCollection(
 }
 
 const LocalDeploymentSettingsSchema = z.object({
-  defaultMode: LocalDeploymentModeSchema,
   defaultTemplateId: TemplateIdSchema,
   templates: z.array(LocalDeploymentTemplateSchema).min(1).max(20),
 }).strict().superRefine(validateTemplateCollection)
@@ -91,15 +89,9 @@ const DEFAULT_LOCAL_TEMPLATE: CertificateLocalDeploymentTemplate = {
   commandTemplate: '',
 }
 
-const LOCAL_DEPLOYMENT_DEFAULTS: CertificateSettings['localDeployment'] = {
-  defaultMode: 'quick',
-  defaultTemplateId: DEFAULT_LOCAL_TEMPLATE.id,
-  templates: [DEFAULT_LOCAL_TEMPLATE],
-}
-
 const DEFAULT_DCV_TEMPLATE: CertificateDcvDelegationTemplate = {
   id: 'default',
-  name: '默认策略',
+  name: '默认模板',
   allowedDomains: [],
   domainMatchMode: 'suffix',
   targetRecordNameTemplate: '{domainWithDashes}.cname',
@@ -112,7 +104,6 @@ const DCV_DELEGATION_DEFAULTS: CertificateSettings['dcvDelegation'] = {
 }
 
 export const CertificateAutomationConfigKeys = {
-  localDefaultMode: 'helper_cert_local_mode',
   localDefaultTemplate: 'helper_cert_local_default',
   localTemplates: 'helper_cert_local_templates',
   dcvDefaultTemplate: 'helper_cert_dcv_default',
@@ -230,7 +221,6 @@ export async function getCertificateAutomationSettings(
     ...Object.values(ConfigKeys),
     ...Object.values(LegacyConfigKeys),
   ])
-  const localMode = LocalDeploymentModeSchema.safeParse(values[ConfigKeys.localDefaultMode])
   const legacyDomainMatchMode = DomainMatchModeSchema.safeParse(values[LegacyConfigKeys.dcvDomainMatchMode])
   const localTemplates = storedLocalTemplates(values[ConfigKeys.localTemplates]) ?? [{
     ...DEFAULT_LOCAL_TEMPLATE,
@@ -255,7 +245,6 @@ export async function getCertificateAutomationSettings(
   }]
   return {
     localDeployment: {
-      defaultMode: localMode.success ? localMode.data : LOCAL_DEPLOYMENT_DEFAULTS.defaultMode,
       defaultTemplateId: selectedDefaultTemplateId(values[ConfigKeys.localDefaultTemplate], localTemplates),
       templates: localTemplates,
     },
@@ -334,7 +323,6 @@ export async function updateCertificateSettings(
         : { cert_notice_custom_webhook: ModeToCode[notifications.customWebhook] }),
       ...(local
         ? {
-            [ConfigKeys.localDefaultMode]: local.defaultMode,
             [ConfigKeys.localDefaultTemplate]: local.defaultTemplateId,
             [ConfigKeys.localTemplates]: JSON.stringify(local.templates),
           }
