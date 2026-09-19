@@ -50,14 +50,6 @@
   "database": {
     "enabled": false,
     "thinkphpEnvPath": "/app/config/thinkphp.env",
-    "host": "127.0.0.1",
-    "port": 3306,
-    "socketPath": "",
-    "user": "dnsmgr_helper",
-    "password": "",
-    "name": "dnsmgr",
-    "charset": "utf8mb4",
-    "tablePrefix": "dnsmgr_",
     "connectionLimit": 5,
     "connectTimeoutMs": 10000,
     "ssl": false
