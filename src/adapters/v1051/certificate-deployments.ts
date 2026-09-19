@@ -29,6 +29,8 @@ import { executeLegacyOperation } from './operations.js'
 
 const PositiveId = z.coerce.number().int().positive()
 const IdList = z.array(PositiveId).min(1).max(1000)
+const TemplateId = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
+const DeploymentTemplateIdKey = '__dnsmgr_helper_template_id'
 
 const DeploymentSortMap = {
   id: 'id',
@@ -61,6 +63,7 @@ export const CertificateDeploymentsQuerySchema = z.object({
 export const CertificateDeploymentMutationSchema = z.object({
   accountId: PositiveId,
   orderId: PositiveId,
+  templateId: TemplateId.nullable().optional(),
   config: z.record(z.string().min(1).max(255), z.unknown()),
   remark: z.string().trim().max(1000).nullable().optional(),
 }).strict()
@@ -279,22 +282,32 @@ export async function getCertificateDeployment(
     throw new ApiError(502, 'UPSTREAM_INVALID_CERTIFICATE_DEPLOYMENT', '原 dnsmgr 返回了无法识别的证书部署任务')
   }
   const remark = stringValue(info.remark)
+  const deploymentConfig = parseConfigObject(
+    info.config ?? {},
+    '证书部署任务配置不是有效 JSON',
+  )
+  const templateId = TemplateId.safeParse(deploymentConfig[DeploymentTemplateIdKey])
+  delete deploymentConfig[DeploymentTemplateIdKey]
   return {
     id,
     accountId,
     accountType,
     orderId,
-    config: parseConfigObject(info.config ?? {}, '证书部署任务配置不是有效 JSON'),
+    ...(templateId.success ? { templateId: templateId.data } : {}),
+    config: deploymentConfig,
     ...(remark ? { remark } : {}),
   }
 }
 
 function deploymentMutationForm(rawBody: unknown) {
   const body = CertificateDeploymentMutationSchema.parse(rawBody)
+  const deploymentConfig = safeConfigObject(body.config)
+  delete deploymentConfig[DeploymentTemplateIdKey]
+  if (body.templateId) deploymentConfig[DeploymentTemplateIdKey] = body.templateId
   return {
     aid: body.accountId,
     oid: body.orderId,
-    config: JSON.stringify(safeConfigObject(body.config)),
+    config: JSON.stringify(deploymentConfig),
     remark: body.remark ?? '',
   }
 }

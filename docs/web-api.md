@@ -349,10 +349,13 @@
 {
   "accountId": 4,
   "orderId": 9,
+  "templateId": "local-default",
   "config": { "path": "/etc/nginx/cert.pem", "reload": true },
   "remark": "边缘入口"
 }
 ```
+
+`templateId` 仅用于 helper 恢复本机部署模板；选择“自定义”时提交 `null`。helper 会把该字段作为内部元数据随部署任务保存，读取详情时再从 `config` 中剥离，不传给前端动态字段。
 
 批量更换证书使用 `{ "ids": [11, 12], "action": "assign-certificate", "orderId": 10 }`；其他批量动作是 `delete`、`reset`、`enable`、`disable`。
 
@@ -381,6 +384,17 @@
 ```
 
 通知模式支持 `off`、`all`、`failures-only`。helper 只会写入证书续签、部署时段和五个通知键，不接受任意系统设置名称。
+
+DCV 模板保存 CNAME 目标域名、目标主机记录模板以及可选的允许托管域名。使用模板新增时只需提交证书域名和模板 ID：
+
+```json
+{
+  "domain": "www.example.com",
+  "dcvTemplateId": "default"
+}
+```
+
+选择“自定义”时提交 `dcvTemplateId: null`，并同时提交 `targetDomainId` 与 `targetRecordName`。允许托管域名固定包含其子域名；留空表示不限制，不再提供容易产生冲突的匹配模式和强制开关。
 
 ## AxisNow 调度管理
 

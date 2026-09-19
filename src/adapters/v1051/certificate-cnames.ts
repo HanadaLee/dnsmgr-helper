@@ -54,10 +54,18 @@ export const CertificateCnamesQuerySchema = z.object({
 
 export const CertificateCnameCreateSchema = z.object({
   domain: DomainNameSchema,
-  targetRecordName: RecordNameSchema,
-  targetDomainId: PositiveId,
+  targetRecordName: RecordNameSchema.optional(),
+  targetDomainId: PositiveId.optional(),
   dcvTemplateId: TemplateIdSchema.nullable().optional(),
-}).strict()
+}).strict().superRefine((value, context) => {
+  if (value.dcvTemplateId !== null) return
+  if (!value.targetRecordName) {
+    context.addIssue({ code: 'custom', path: ['targetRecordName'], message: '自定义模式必须填写目标主机记录' })
+  }
+  if (!value.targetDomainId) {
+    context.addIssue({ code: 'custom', path: ['targetDomainId'], message: '自定义模式必须选择目标域名' })
+  }
+})
 
 export const CertificateCnameUpdateSchema = z.object({
   targetRecordName: RecordNameSchema,
@@ -83,8 +91,7 @@ function domainAllowed(
   const normalized = normalizedDelegationDomain(domain)
   return template.allowedDomains.some((allowed) => {
     const candidate = normalizedDelegationDomain(allowed)
-    return normalized === candidate
-      || (template.domainMatchMode === 'suffix' && normalized.endsWith(`.${candidate}`))
+    return normalized === candidate || normalized.endsWith(`.${candidate}`)
   })
 }
 
@@ -101,20 +108,32 @@ function selectedDcvTemplate(
   return template
 }
 
-export function resolveDcvTargetRecordName(
+export function resolveDcvTarget(
   domain: string,
-  requestedRecordName: string,
+  requestedRecordName: string | undefined,
+  requestedDomainId: number | undefined,
   settings: CertificateSettings['dcvDelegation'],
   requestedTemplateId?: string | null,
-): string {
+): { targetRecordName: string; targetDomainId: number } {
   const template = selectedDcvTemplate(settings, requestedTemplateId)
-  if (!template) return requestedRecordName
+  if (!template) {
+    return {
+      targetRecordName: RecordNameSchema.parse(requestedRecordName),
+      targetDomainId: PositiveId.parse(requestedDomainId),
+    }
+  }
   if (!domainAllowed(domain, template)) {
     throw new ApiError(422, 'DCV_DOMAIN_NOT_ALLOWED', '该证书域名不在允许托管的域名范围内')
   }
-  return template.forceTargetRecordNameTemplate
-    ? RecordNameSchema.parse(renderDcvTargetRecordName(template.targetRecordNameTemplate, domain))
-    : requestedRecordName
+  if (!template.targetDomainId) {
+    throw new ApiError(422, 'DCV_TEMPLATE_TARGET_NOT_CONFIGURED', '所选 DCV 模板尚未配置目标域名')
+  }
+  return {
+    targetRecordName: RecordNameSchema.parse(
+      renderDcvTargetRecordName(template.targetRecordNameTemplate, domain),
+    ),
+    targetDomainId: template.targetDomainId,
+  }
 }
 
 function normalizeCertificateCname(row: LegacyObject): CertificateCnameProxy {
@@ -197,14 +216,15 @@ export async function createCertificateCname(
   settings: CertificateSettings['dcvDelegation'],
 ) {
   const body = CertificateCnameCreateSchema.parse(rawBody)
-  const targetRecordName = resolveDcvTargetRecordName(
+  const target = resolveDcvTarget(
     body.domain,
     body.targetRecordName,
+    body.targetDomainId,
     settings,
     body.dcvTemplateId,
   )
   const result = await executeLegacyOperation(client, config, context, 'certificateCnames.create', {
-    form: { domain: body.domain, rr: targetRecordName, did: body.targetDomainId },
+    form: { domain: body.domain, rr: target.targetRecordName, did: target.targetDomainId },
   })
   return operationMessage(result.message)
 }

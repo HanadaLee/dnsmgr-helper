@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildApp } from '../src/app.js'
-import { resolveDcvTargetRecordName } from '../src/adapters/v1051/certificate-cnames.js'
+import { resolveDcvTarget } from '../src/adapters/v1051/certificate-cnames.js'
 import {
   CertificateAutomationConfigKeys,
   CertificateSettingsMutationSchema,
@@ -104,14 +104,20 @@ describe('typed certificate API', () => {
         pemCertificatePathTemplate: '/srv/{domain}/cert.pem',
       }],
     })
-    expect(resolveDcvTargetRecordName(
+    expect(settings.dcvDelegation.templates[0]).toMatchObject({
+      targetDomainId: null,
+      targetRecordNameTemplate: '_acme-{domainWithDashes}',
+    })
+    expect(() => resolveDcvTarget(
       'www.example.com',
-      'ignored',
+      undefined,
+      undefined,
       settings.dcvDelegation,
-    )).toBe('_acme-www-example-com')
-    expect(() => resolveDcvTargetRecordName(
+    )).toThrow('尚未配置目标域名')
+    expect(() => resolveDcvTarget(
       'outside.example.net',
-      'requested',
+      undefined,
+      undefined,
       settings.dcvDelegation,
     )).toThrow('不在允许托管的域名范围内')
   })
@@ -135,6 +141,7 @@ describe('typed certificate API', () => {
     const dcvTemplates = [{
       id: 'public',
       name: '公网托管',
+      targetDomainId: 42,
       allowedDomains: ['example.com'],
       domainMatchMode: 'suffix' as const,
       targetRecordNameTemplate: '{domainWithDashes}.public',
@@ -142,6 +149,7 @@ describe('typed certificate API', () => {
     }, {
       id: 'internal',
       name: '内网托管',
+      targetDomainId: 43,
       allowedDomains: ['internal.example'],
       domainMatchMode: 'exact' as const,
       targetRecordNameTemplate: '{domain}.internal',
@@ -160,30 +168,34 @@ describe('typed certificate API', () => {
       defaultTemplateId: 'origin',
       templates: localTemplates,
     })
-    expect(resolveDcvTargetRecordName(
+    expect(resolveDcvTarget(
       'internal.example',
-      'ignored',
+      undefined,
+      undefined,
       settings.dcvDelegation,
       'internal',
-    )).toBe('internal.example.internal')
-    expect(() => resolveDcvTargetRecordName(
+    )).toEqual({ targetRecordName: 'internal.example.internal', targetDomainId: 43 })
+    expect(resolveDcvTarget(
       'www.internal.example',
-      'ignored',
+      undefined,
+      undefined,
       settings.dcvDelegation,
       'internal',
-    )).toThrow('不在允许托管的域名范围内')
-    expect(() => resolveDcvTargetRecordName(
+    )).toEqual({ targetRecordName: 'www.internal.example.internal', targetDomainId: 43 })
+    expect(() => resolveDcvTarget(
       'example.com',
-      'ignored',
+      undefined,
+      undefined,
       settings.dcvDelegation,
       'missing',
     )).toThrow('所选 DCV 模板不存在')
-    expect(resolveDcvTargetRecordName(
+    expect(resolveDcvTarget(
       'outside.example.net',
       'custom-record',
+      44,
       settings.dcvDelegation,
       null,
-    )).toBe('custom-record')
+    )).toEqual({ targetRecordName: 'custom-record', targetDomainId: 44 })
   })
 
   it('discovers the AxisNow deployment account definition and its numeric options', async () => {
@@ -496,10 +508,9 @@ describe('typed certificate API', () => {
     const dcvTemplates = [{
       id: 'dcv-default',
       name: '默认托管',
+      targetDomainId: 42,
       allowedDomains: ['example.com'],
-      domainMatchMode: 'suffix' as const,
       targetRecordNameTemplate: '{domainWithDashes}.cname',
-      forceTargetRecordNameTemplate: true,
     }]
     const app = await appWith((url, init) => {
       if (url.pathname === '/internal/cert/deploy/add' && init.method === 'GET') {
@@ -508,7 +519,7 @@ describe('typed certificate API', () => {
           <script>var info=null; var typeList={"nginx":{"name":"Nginx","taskinputs":{"path":{"name":"证书路径","type":"input","required":true},"pem_key_file":{"name":"私钥保存路径","type":"input","required":true}},"tasknote":"重新加载服务"}};</script>`)
       }
       if (url.pathname === '/internal/cert/deploy/edit' && init.method === 'GET') {
-        return html(`<script>var info={"id":11,"aid":4,"oid":9,"type":"nginx","config":"{\\"path\\":\\"/etc/nginx/cert.pem\\"}","remark":"edge"};</script>`)
+        return html(`<script>var info={"id":11,"aid":4,"oid":9,"type":"nginx","config":"{\\"path\\":\\"/etc/nginx/cert.pem\\",\\"__dnsmgr_helper_template_id\\":\\"local-default\\"}","remark":"edge"};</script>`)
       }
       if (url.pathname === '/internal/cert/deploy/data') {
         expect(Object.fromEntries(form(init))).toEqual({
@@ -531,7 +542,7 @@ describe('typed certificate API', () => {
         const values = form(init)
         if (url.pathname.endsWith('/add')) {
           expect(Object.fromEntries(values)).toEqual({
-            aid: '4', oid: '9', config: '{"path":"/etc/nginx/cert.pem"}', remark: 'edge',
+            aid: '4', oid: '9', config: '{"path":"/etc/nginx/cert.pem","__dnsmgr_helper_template_id":"local-default"}', remark: 'edge',
           })
         }
         if (url.pathname.endsWith('/operation')) {
@@ -600,7 +611,7 @@ describe('typed certificate API', () => {
       headers,
     })
     const deploymentPayload = {
-      accountId: 4, orderId: 9, config: { path: '/etc/nginx/cert.pem' }, remark: 'edge',
+      accountId: 4, orderId: 9, templateId: 'local-default', config: { path: '/etc/nginx/cert.pem' }, remark: 'edge',
     }
     const deploymentResponses = await Promise.all([
       app.inject({ method: 'POST', url: '/api/web/v1/certificate-deployments', headers, payload: deploymentPayload }),
@@ -645,7 +656,7 @@ describe('typed certificate API', () => {
     expect(deploymentDetail.json()).toEqual({
       code: 'OK', data: {
         id: 11, accountId: 4, accountType: 'nginx', orderId: 9,
-        config: { path: '/etc/nginx/cert.pem' }, remark: 'edge',
+        templateId: 'local-default', config: { path: '/etc/nginx/cert.pem' }, remark: 'edge',
       },
     })
     expect(deploymentLog.json()).toEqual({ code: 'OK', data: { content: 'deploy complete', modifiedAt: 1788119000 } })
@@ -721,10 +732,9 @@ describe('typed certificate API', () => {
           templates: [{
             id: 'default',
             name: '默认模板',
+            targetDomainId: null,
             allowedDomains: [],
-            domainMatchMode: 'suffix',
             targetRecordNameTemplate: '{domainWithDashes}.cname',
-            forceTargetRecordNameTemplate: false,
           }],
         },
       },

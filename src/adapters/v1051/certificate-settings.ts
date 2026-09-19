@@ -15,7 +15,6 @@ import { namedElementAttribute } from './html-state.js'
 import { executeLegacyOperation } from './operations.js'
 
 const NotificationModeSchema = z.enum(['off', 'all', 'failures-only'])
-const DomainMatchModeSchema = z.enum(['exact', 'suffix'])
 const TemplateIdSchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
 const TemplateNameSchema = z.string().trim().min(1).max(64)
 const PathTemplateSchema = z.string().trim().min(1).max(4096)
@@ -42,14 +41,23 @@ const LocalDeploymentTemplateSchema = z.object({
 const DcvDelegationTemplateSchema = z.object({
   id: TemplateIdSchema,
   name: TemplateNameSchema,
+  targetDomainId: z.number().int().positive().nullable(),
   allowedDomains: z.array(AllowedDomainSchema).max(1000).refine(
     (domains) => new Set(domains).size === domains.length,
     '允许托管的域名不能重复',
   ),
-  domainMatchMode: DomainMatchModeSchema,
   targetRecordNameTemplate: TargetRecordNameTemplateSchema,
-  forceTargetRecordNameTemplate: z.boolean(),
 }).strict()
+
+const StoredDcvDelegationTemplateSchema = z.object({
+  id: TemplateIdSchema,
+  name: TemplateNameSchema,
+  targetDomainId: z.number().int().positive().nullable().optional(),
+  allowedDomains: z.array(AllowedDomainSchema).max(1000).default([]),
+  targetRecordNameTemplate: TargetRecordNameTemplateSchema,
+  domainMatchMode: z.enum(['exact', 'suffix']).optional(),
+  forceTargetRecordNameTemplate: z.boolean().optional(),
+}).passthrough()
 
 function validateTemplateCollection(
   value: { defaultTemplateId: string; templates: Array<{ id: string; name: string }> },
@@ -92,10 +100,9 @@ const DEFAULT_LOCAL_TEMPLATE: CertificateLocalDeploymentTemplate = {
 const DEFAULT_DCV_TEMPLATE: CertificateDcvDelegationTemplate = {
   id: 'default',
   name: '默认模板',
+  targetDomainId: null,
   allowedDomains: [],
-  domainMatchMode: 'suffix',
   targetRecordNameTemplate: '{domainWithDashes}.cname',
-  forceTargetRecordNameTemplate: false,
 }
 
 const DCV_DELEGATION_DEFAULTS: CertificateSettings['dcvDelegation'] = {
@@ -117,9 +124,7 @@ const LegacyConfigKeys = {
   localPfxPathTemplate: 'helper_cert_local_pfx_path',
   localCommandTemplate: 'helper_cert_local_command',
   dcvAllowedDomains: 'helper_cert_dcv_domains',
-  dcvDomainMatchMode: 'helper_cert_dcv_match_mode',
   dcvTargetRecordNameTemplate: 'helper_cert_dcv_target_name',
-  dcvForceTargetRecordNameTemplate: 'helper_cert_dcv_force_target',
 } as const
 
 export type ConfigValueReader = {
@@ -198,8 +203,16 @@ function storedLocalTemplates(value: string | undefined): CertificateLocalDeploy
 function storedDcvTemplates(value: string | undefined): CertificateDcvDelegationTemplate[] | undefined {
   if (!value) return undefined
   try {
-    const result = z.array(DcvDelegationTemplateSchema).min(1).max(20).safeParse(JSON.parse(value))
-    return result.success ? result.data : undefined
+    const result = z.array(StoredDcvDelegationTemplateSchema).min(1).max(20).safeParse(JSON.parse(value))
+    return result.success
+      ? result.data.map((template) => ({
+          id: template.id,
+          name: template.name,
+          targetDomainId: template.targetDomainId ?? null,
+          allowedDomains: template.allowedDomains,
+          targetRecordNameTemplate: template.targetRecordNameTemplate,
+        }))
+      : undefined
   } catch {
     return undefined
   }
@@ -221,7 +234,6 @@ export async function getCertificateAutomationSettings(
     ...Object.values(ConfigKeys),
     ...Object.values(LegacyConfigKeys),
   ])
-  const legacyDomainMatchMode = DomainMatchModeSchema.safeParse(values[LegacyConfigKeys.dcvDomainMatchMode])
   const localTemplates = storedLocalTemplates(values[ConfigKeys.localTemplates]) ?? [{
     ...DEFAULT_LOCAL_TEMPLATE,
     pemCertificatePathTemplate: values[LegacyConfigKeys.localPemCertificatePathTemplate]
@@ -236,12 +248,8 @@ export async function getCertificateAutomationSettings(
   const dcvTemplates = storedDcvTemplates(values[ConfigKeys.dcvTemplates]) ?? [{
     ...DEFAULT_DCV_TEMPLATE,
     allowedDomains: allowedDomains(values[LegacyConfigKeys.dcvAllowedDomains]),
-    domainMatchMode: legacyDomainMatchMode.success
-      ? legacyDomainMatchMode.data
-      : DEFAULT_DCV_TEMPLATE.domainMatchMode,
     targetRecordNameTemplate: values[LegacyConfigKeys.dcvTargetRecordNameTemplate]
       || DEFAULT_DCV_TEMPLATE.targetRecordNameTemplate,
-    forceTargetRecordNameTemplate: values[LegacyConfigKeys.dcvForceTargetRecordNameTemplate] === '1',
   }]
   return {
     localDeployment: {

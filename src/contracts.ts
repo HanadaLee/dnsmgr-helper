@@ -588,6 +588,7 @@ export type CertificateDeploymentDetail = {
   accountId: number
   accountType: string
   orderId: number
+  templateId?: string
   config: Record<string, unknown>
   remark?: string
 }
@@ -618,10 +619,9 @@ export type CertificateLocalDeploymentTemplate = {
 export type CertificateDcvDelegationTemplate = {
   id: string
   name: string
+  targetDomainId: number | null
   allowedDomains: string[]
-  domainMatchMode: 'exact' | 'suffix'
   targetRecordNameTemplate: string
-  forceTargetRecordNameTemplate: boolean
 }
 
 export type CertificateSettings = {
