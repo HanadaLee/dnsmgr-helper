@@ -1,7 +1,12 @@
 import { z } from 'zod'
 
 import type { AppConfig } from '../../config.js'
-import type { CertificateNotificationMode, CertificateSettings } from '../../contracts.js'
+import type {
+  CertificateDcvDelegationTemplate,
+  CertificateLocalDeploymentTemplate,
+  CertificateNotificationMode,
+  CertificateSettings,
+} from '../../contracts.js'
 import { ApiError } from '../../errors.js'
 import type { DnsmgrClient, RequestContext } from '../../upstream/client.js'
 import { requireUpstreamHtml } from '../../upstream/legacy.js'
@@ -12,6 +17,8 @@ import { executeLegacyOperation } from './operations.js'
 const NotificationModeSchema = z.enum(['off', 'all', 'failures-only'])
 const LocalDeploymentModeSchema = z.enum(['quick', 'custom'])
 const DomainMatchModeSchema = z.enum(['exact', 'suffix'])
+const TemplateIdSchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
+const TemplateNameSchema = z.string().trim().min(1).max(64)
 const PathTemplateSchema = z.string().trim().min(1).max(4096)
 const CommandTemplateSchema = z.string().trim().max(4096)
 const AllowedDomainSchema = z.string().trim().toLowerCase().min(3).max(253).transform(
@@ -24,23 +31,96 @@ const TargetRecordNameTemplateSchema = z.string().trim().min(1).max(253).superRe
   }
 })
 
-const LOCAL_DEPLOYMENT_DEFAULTS: CertificateSettings['localDeployment'] = {
-  defaultMode: 'quick',
+const LocalDeploymentTemplateSchema = z.object({
+  id: TemplateIdSchema,
+  name: TemplateNameSchema,
+  pemCertificatePathTemplate: PathTemplateSchema,
+  pemPrivateKeyPathTemplate: PathTemplateSchema,
+  pfxPathTemplate: PathTemplateSchema,
+  commandTemplate: CommandTemplateSchema,
+}).strict()
+
+const DcvDelegationTemplateSchema = z.object({
+  id: TemplateIdSchema,
+  name: TemplateNameSchema,
+  allowedDomains: z.array(AllowedDomainSchema).max(1000).refine(
+    (domains) => new Set(domains).size === domains.length,
+    '允许托管的域名不能重复',
+  ),
+  domainMatchMode: DomainMatchModeSchema,
+  targetRecordNameTemplate: TargetRecordNameTemplateSchema,
+  forceTargetRecordNameTemplate: z.boolean(),
+}).strict()
+
+function validateTemplateCollection(
+  value: { defaultTemplateId: string; templates: Array<{ id: string; name: string }> },
+  context: z.RefinementCtx,
+) {
+  const ids = value.templates.map((template) => template.id)
+  const names = value.templates.map((template) => template.name)
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({ code: 'custom', path: ['templates'], message: '模板 ID 不能重复' })
+  }
+  if (new Set(names).size !== names.length) {
+    context.addIssue({ code: 'custom', path: ['templates'], message: '模板名称不能重复' })
+  }
+  if (!ids.includes(value.defaultTemplateId)) {
+    context.addIssue({ code: 'custom', path: ['defaultTemplateId'], message: '默认模板必须存在' })
+  }
+  if (Buffer.byteLength(JSON.stringify(value.templates), 'utf8') > 60_000) {
+    context.addIssue({ code: 'custom', path: ['templates'], message: '模板配置总大小不能超过 60000 字节' })
+  }
+}
+
+const LocalDeploymentSettingsSchema = z.object({
+  defaultMode: LocalDeploymentModeSchema,
+  defaultTemplateId: TemplateIdSchema,
+  templates: z.array(LocalDeploymentTemplateSchema).min(1).max(20),
+}).strict().superRefine(validateTemplateCollection)
+const DcvDelegationSettingsSchema = z.object({
+  defaultTemplateId: TemplateIdSchema,
+  templates: z.array(DcvDelegationTemplateSchema).min(1).max(20),
+}).strict().superRefine(validateTemplateCollection)
+
+const DEFAULT_LOCAL_TEMPLATE: CertificateLocalDeploymentTemplate = {
+  id: 'default',
+  name: '默认模板',
   pemCertificatePathTemplate: '/etc/ssl/{domain}/fullchain.pem',
   pemPrivateKeyPathTemplate: '/etc/ssl/{domain}/privkey.pem',
   pfxPathTemplate: '/etc/ssl/{domain}/certificate.pfx',
   commandTemplate: '',
 }
 
-const DCV_DELEGATION_DEFAULTS: CertificateSettings['dcvDelegation'] = {
+const LOCAL_DEPLOYMENT_DEFAULTS: CertificateSettings['localDeployment'] = {
+  defaultMode: 'quick',
+  defaultTemplateId: DEFAULT_LOCAL_TEMPLATE.id,
+  templates: [DEFAULT_LOCAL_TEMPLATE],
+}
+
+const DEFAULT_DCV_TEMPLATE: CertificateDcvDelegationTemplate = {
+  id: 'default',
+  name: '默认策略',
   allowedDomains: [],
   domainMatchMode: 'suffix',
   targetRecordNameTemplate: '{domainWithDashes}.cname',
   forceTargetRecordNameTemplate: false,
 }
 
+const DCV_DELEGATION_DEFAULTS: CertificateSettings['dcvDelegation'] = {
+  defaultTemplateId: DEFAULT_DCV_TEMPLATE.id,
+  templates: [DEFAULT_DCV_TEMPLATE],
+}
+
 export const CertificateAutomationConfigKeys = {
   localDefaultMode: 'helper_cert_local_mode',
+  localDefaultTemplate: 'helper_cert_local_default',
+  localTemplates: 'helper_cert_local_templates',
+  dcvDefaultTemplate: 'helper_cert_dcv_default',
+  dcvTemplates: 'helper_cert_dcv_templates',
+} as const
+
+const ConfigKeys = CertificateAutomationConfigKeys
+const LegacyConfigKeys = {
   localPemCertificatePathTemplate: 'helper_cert_local_pem_cert',
   localPemPrivateKeyPathTemplate: 'helper_cert_local_pem_key',
   localPfxPathTemplate: 'helper_cert_local_pfx_path',
@@ -50,8 +130,6 @@ export const CertificateAutomationConfigKeys = {
   dcvTargetRecordNameTemplate: 'helper_cert_dcv_target_name',
   dcvForceTargetRecordNameTemplate: 'helper_cert_dcv_force_target',
 } as const
-
-const ConfigKeys = CertificateAutomationConfigKeys
 
 export type ConfigValueReader = {
   getConfigValues(keys: string[]): Promise<Record<string, string>>
@@ -72,22 +150,8 @@ export const CertificateSettingsMutationSchema = z.object({
     endHour: z.coerce.number().int().min(0).max(23),
   }).strict().optional(),
   notifications: NotificationsSchema.optional(),
-  localDeployment: z.object({
-    defaultMode: LocalDeploymentModeSchema,
-    pemCertificatePathTemplate: PathTemplateSchema,
-    pemPrivateKeyPathTemplate: PathTemplateSchema,
-    pfxPathTemplate: PathTemplateSchema,
-    commandTemplate: CommandTemplateSchema,
-  }).strict().optional(),
-  dcvDelegation: z.object({
-    allowedDomains: z.array(AllowedDomainSchema).max(1000).refine(
-      (domains) => new Set(domains).size === domains.length,
-      '允许托管的域名不能重复',
-    ),
-    domainMatchMode: DomainMatchModeSchema,
-    targetRecordNameTemplate: TargetRecordNameTemplateSchema,
-    forceTargetRecordNameTemplate: z.boolean(),
-  }).strict().optional(),
+  localDeployment: LocalDeploymentSettingsSchema.optional(),
+  dcvDelegation: DcvDelegationSettingsSchema.optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, '至少需要提交一项证书设置')
 
 const ModeToCode = {
@@ -130,30 +194,74 @@ function allowedDomains(value: string | undefined): string[] {
   })))
 }
 
+function storedLocalTemplates(value: string | undefined): CertificateLocalDeploymentTemplate[] | undefined {
+  if (!value) return undefined
+  try {
+    const result = z.array(LocalDeploymentTemplateSchema).min(1).max(20).safeParse(JSON.parse(value))
+    return result.success ? result.data : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function storedDcvTemplates(value: string | undefined): CertificateDcvDelegationTemplate[] | undefined {
+  if (!value) return undefined
+  try {
+    const result = z.array(DcvDelegationTemplateSchema).min(1).max(20).safeParse(JSON.parse(value))
+    return result.success ? result.data : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function selectedDefaultTemplateId<T extends { id: string }>(
+  requestedId: string | undefined,
+  templates: T[],
+): string {
+  return templates.some((template) => template.id === requestedId)
+    ? requestedId!
+    : templates[0]!.id
+}
+
 export async function getCertificateAutomationSettings(
   reader: ConfigValueReader,
 ): Promise<Pick<CertificateSettings, 'localDeployment' | 'dcvDelegation'>> {
-  const values = await reader.getConfigValues(Object.values(ConfigKeys))
+  const values = await reader.getConfigValues([
+    ...Object.values(ConfigKeys),
+    ...Object.values(LegacyConfigKeys),
+  ])
   const localMode = LocalDeploymentModeSchema.safeParse(values[ConfigKeys.localDefaultMode])
-  const domainMatchMode = DomainMatchModeSchema.safeParse(values[ConfigKeys.dcvDomainMatchMode])
+  const legacyDomainMatchMode = DomainMatchModeSchema.safeParse(values[LegacyConfigKeys.dcvDomainMatchMode])
+  const localTemplates = storedLocalTemplates(values[ConfigKeys.localTemplates]) ?? [{
+    ...DEFAULT_LOCAL_TEMPLATE,
+    pemCertificatePathTemplate: values[LegacyConfigKeys.localPemCertificatePathTemplate]
+      || DEFAULT_LOCAL_TEMPLATE.pemCertificatePathTemplate,
+    pemPrivateKeyPathTemplate: values[LegacyConfigKeys.localPemPrivateKeyPathTemplate]
+      || DEFAULT_LOCAL_TEMPLATE.pemPrivateKeyPathTemplate,
+    pfxPathTemplate: values[LegacyConfigKeys.localPfxPathTemplate]
+      || DEFAULT_LOCAL_TEMPLATE.pfxPathTemplate,
+    commandTemplate: values[LegacyConfigKeys.localCommandTemplate]
+      ?? DEFAULT_LOCAL_TEMPLATE.commandTemplate,
+  }]
+  const dcvTemplates = storedDcvTemplates(values[ConfigKeys.dcvTemplates]) ?? [{
+    ...DEFAULT_DCV_TEMPLATE,
+    allowedDomains: allowedDomains(values[LegacyConfigKeys.dcvAllowedDomains]),
+    domainMatchMode: legacyDomainMatchMode.success
+      ? legacyDomainMatchMode.data
+      : DEFAULT_DCV_TEMPLATE.domainMatchMode,
+    targetRecordNameTemplate: values[LegacyConfigKeys.dcvTargetRecordNameTemplate]
+      || DEFAULT_DCV_TEMPLATE.targetRecordNameTemplate,
+    forceTargetRecordNameTemplate: values[LegacyConfigKeys.dcvForceTargetRecordNameTemplate] === '1',
+  }]
   return {
     localDeployment: {
       defaultMode: localMode.success ? localMode.data : LOCAL_DEPLOYMENT_DEFAULTS.defaultMode,
-      pemCertificatePathTemplate: values[ConfigKeys.localPemCertificatePathTemplate]
-        || LOCAL_DEPLOYMENT_DEFAULTS.pemCertificatePathTemplate,
-      pemPrivateKeyPathTemplate: values[ConfigKeys.localPemPrivateKeyPathTemplate]
-        || LOCAL_DEPLOYMENT_DEFAULTS.pemPrivateKeyPathTemplate,
-      pfxPathTemplate: values[ConfigKeys.localPfxPathTemplate]
-        || LOCAL_DEPLOYMENT_DEFAULTS.pfxPathTemplate,
-      commandTemplate: values[ConfigKeys.localCommandTemplate]
-        ?? LOCAL_DEPLOYMENT_DEFAULTS.commandTemplate,
+      defaultTemplateId: selectedDefaultTemplateId(values[ConfigKeys.localDefaultTemplate], localTemplates),
+      templates: localTemplates,
     },
     dcvDelegation: {
-      allowedDomains: allowedDomains(values[ConfigKeys.dcvAllowedDomains]),
-      domainMatchMode: domainMatchMode.success ? domainMatchMode.data : DCV_DELEGATION_DEFAULTS.domainMatchMode,
-      targetRecordNameTemplate: values[ConfigKeys.dcvTargetRecordNameTemplate]
-        || DCV_DELEGATION_DEFAULTS.targetRecordNameTemplate,
-      forceTargetRecordNameTemplate: values[ConfigKeys.dcvForceTargetRecordNameTemplate] === '1',
+      defaultTemplateId: selectedDefaultTemplateId(values[ConfigKeys.dcvDefaultTemplate], dcvTemplates),
+      templates: dcvTemplates,
     },
   }
 }
@@ -227,18 +335,14 @@ export async function updateCertificateSettings(
       ...(local
         ? {
             [ConfigKeys.localDefaultMode]: local.defaultMode,
-            [ConfigKeys.localPemCertificatePathTemplate]: local.pemCertificatePathTemplate,
-            [ConfigKeys.localPemPrivateKeyPathTemplate]: local.pemPrivateKeyPathTemplate,
-            [ConfigKeys.localPfxPathTemplate]: local.pfxPathTemplate,
-            [ConfigKeys.localCommandTemplate]: local.commandTemplate,
+            [ConfigKeys.localDefaultTemplate]: local.defaultTemplateId,
+            [ConfigKeys.localTemplates]: JSON.stringify(local.templates),
           }
         : {}),
       ...(dcv
         ? {
-            [ConfigKeys.dcvAllowedDomains]: JSON.stringify(dcv.allowedDomains),
-            [ConfigKeys.dcvDomainMatchMode]: dcv.domainMatchMode,
-            [ConfigKeys.dcvTargetRecordNameTemplate]: dcv.targetRecordNameTemplate,
-            [ConfigKeys.dcvForceTargetRecordNameTemplate]: dcv.forceTargetRecordNameTemplate ? 1 : 0,
+            [ConfigKeys.dcvDefaultTemplate]: dcv.defaultTemplateId,
+            [ConfigKeys.dcvTemplates]: JSON.stringify(dcv.templates),
           }
         : {}),
     },

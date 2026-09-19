@@ -4,6 +4,7 @@ import { buildApp } from '../src/app.js'
 import { resolveDcvTargetRecordName } from '../src/adapters/v1051/certificate-cnames.js'
 import {
   CertificateAutomationConfigKeys,
+  CertificateSettingsMutationSchema,
   getCertificateAutomationSettings,
 } from '../src/adapters/v1051/certificate-settings.js'
 import { parseConfig } from '../src/config.js'
@@ -60,6 +61,32 @@ describe('typed certificate API', () => {
     expect(Object.values(CertificateAutomationConfigKeys).every((key) => key.length <= 32)).toBe(true)
   })
 
+  it('rejects duplicate template names and missing defaults', () => {
+    const template = {
+      id: 'one',
+      name: '重复名称',
+      pemCertificatePathTemplate: '/srv/{domain}/cert.pem',
+      pemPrivateKeyPathTemplate: '/srv/{domain}/key.pem',
+      pfxPathTemplate: '/srv/{domain}/cert.pfx',
+      commandTemplate: '',
+    }
+    const result = CertificateSettingsMutationSchema.safeParse({
+      localDeployment: {
+        defaultMode: 'quick',
+        defaultTemplateId: 'missing',
+        templates: [template, { ...template, id: 'two' }],
+      },
+    })
+
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message)).toEqual(expect.arrayContaining([
+        '模板名称不能重复',
+        '默认模板必须存在',
+      ]))
+    }
+  })
+
   it('loads helper certificate policies and enforces DCV domain and record templates', async () => {
     const settings = await getCertificateAutomationSettings({
       getConfigValues: async () => ({
@@ -73,7 +100,12 @@ describe('typed certificate API', () => {
     })
     expect(settings.localDeployment).toMatchObject({
       defaultMode: 'custom',
-      pemCertificatePathTemplate: '/srv/{domain}/cert.pem',
+      defaultTemplateId: 'default',
+      templates: [{
+        id: 'default',
+        name: '默认模板',
+        pemCertificatePathTemplate: '/srv/{domain}/cert.pem',
+      }],
     })
     expect(resolveDcvTargetRecordName(
       'www.example.com',
@@ -85,6 +117,72 @@ describe('typed certificate API', () => {
       'requested',
       settings.dcvDelegation,
     )).toThrow('不在允许托管的域名范围内')
+  })
+
+  it('loads multiple certificate templates and applies the selected DCV policy', async () => {
+    const localTemplates = [{
+      id: 'edge',
+      name: '边缘节点',
+      pemCertificatePathTemplate: '/edge/{domain}/cert.pem',
+      pemPrivateKeyPathTemplate: '/edge/{domain}/key.pem',
+      pfxPathTemplate: '/edge/{domain}/cert.pfx',
+      commandTemplate: 'reload edge',
+    }, {
+      id: 'origin',
+      name: '源站',
+      pemCertificatePathTemplate: '/origin/{domain}/cert.pem',
+      pemPrivateKeyPathTemplate: '/origin/{domain}/key.pem',
+      pfxPathTemplate: '/origin/{domain}/cert.pfx',
+      commandTemplate: 'reload origin',
+    }]
+    const dcvTemplates = [{
+      id: 'public',
+      name: '公网托管',
+      allowedDomains: ['example.com'],
+      domainMatchMode: 'suffix' as const,
+      targetRecordNameTemplate: '{domainWithDashes}.public',
+      forceTargetRecordNameTemplate: true,
+    }, {
+      id: 'internal',
+      name: '内网托管',
+      allowedDomains: ['internal.example'],
+      domainMatchMode: 'exact' as const,
+      targetRecordNameTemplate: '{domain}.internal',
+      forceTargetRecordNameTemplate: true,
+    }]
+    const settings = await getCertificateAutomationSettings({
+      getConfigValues: async () => ({
+        helper_cert_local_mode: 'quick',
+        helper_cert_local_default: 'origin',
+        helper_cert_local_templates: JSON.stringify(localTemplates),
+        helper_cert_dcv_default: 'public',
+        helper_cert_dcv_templates: JSON.stringify(dcvTemplates),
+      }),
+    })
+
+    expect(settings.localDeployment).toEqual({
+      defaultMode: 'quick',
+      defaultTemplateId: 'origin',
+      templates: localTemplates,
+    })
+    expect(resolveDcvTargetRecordName(
+      'internal.example',
+      'ignored',
+      settings.dcvDelegation,
+      'internal',
+    )).toBe('internal.example.internal')
+    expect(() => resolveDcvTargetRecordName(
+      'www.internal.example',
+      'ignored',
+      settings.dcvDelegation,
+      'internal',
+    )).toThrow('不在允许托管的域名范围内')
+    expect(() => resolveDcvTargetRecordName(
+      'example.com',
+      'ignored',
+      settings.dcvDelegation,
+      'missing',
+    )).toThrow('所选 DCV 托管策略不存在')
   })
 
   it('discovers the AxisNow deployment account definition and its numeric options', async () => {
@@ -379,6 +477,29 @@ describe('typed certificate API', () => {
   it('covers deployments, CNAME delegation and the fixed certificate settings whitelist', async () => {
     const deploymentActions: string[] = []
     const cnameActions: string[] = []
+    const localTemplates = [{
+      id: 'local-default',
+      name: '本机默认',
+      pemCertificatePathTemplate: '/srv/certs/{domain}/fullchain.pem',
+      pemPrivateKeyPathTemplate: '/srv/certs/{domain}/privkey.pem',
+      pfxPathTemplate: '/srv/certs/{domain}/certificate.pfx',
+      commandTemplate: 'nginx -s reload',
+    }, {
+      id: 'local-backup',
+      name: '本机备用',
+      pemCertificatePathTemplate: '/backup/{domain}/fullchain.pem',
+      pemPrivateKeyPathTemplate: '/backup/{domain}/privkey.pem',
+      pfxPathTemplate: '/backup/{domain}/certificate.pfx',
+      commandTemplate: '',
+    }]
+    const dcvTemplates = [{
+      id: 'dcv-default',
+      name: '默认托管',
+      allowedDomains: ['example.com'],
+      domainMatchMode: 'suffix' as const,
+      targetRecordNameTemplate: '{domainWithDashes}.cname',
+      forceTargetRecordNameTemplate: true,
+    }]
     const app = await appWith((url, init) => {
       if (url.pathname === '/internal/cert/deploy/add' && init.method === 'GET') {
         return html(`<select name="aid"><option value="">请选择</option><option value="4" data-type="nginx">4_Nginx</option></select>
@@ -447,18 +568,15 @@ describe('typed certificate API', () => {
           <select name="cert_notice_custom_webhook" default="0"></select>`)
       }
       if (url.pathname === '/internal/system/set') {
-        expect(Object.fromEntries(form(init))).toEqual({
+        const values = Object.fromEntries(form(init))
+        expect(values).toMatchObject({
           cert_renewdays: '30', cert_notice_mail: '2', cert_notice_custom_webhook: '1',
           helper_cert_local_mode: 'quick',
-          helper_cert_local_pem_cert: '/srv/certs/{domain}/fullchain.pem',
-          helper_cert_local_pem_key: '/srv/certs/{domain}/privkey.pem',
-          helper_cert_local_pfx_path: '/srv/certs/{domain}/certificate.pfx',
-          helper_cert_local_command: 'nginx -s reload',
-          helper_cert_dcv_domains: '["example.com"]',
-          helper_cert_dcv_match_mode: 'suffix',
-          helper_cert_dcv_target_name: '{domainWithDashes}.cname',
-          helper_cert_dcv_force_target: '1',
+          helper_cert_local_default: 'local-default',
+          helper_cert_dcv_default: 'dcv-default',
         })
+        expect(JSON.parse(values.helper_cert_local_templates!)).toEqual(localTemplates)
+        expect(JSON.parse(values.helper_cert_dcv_templates!)).toEqual(dcvTemplates)
         return json({ code: 0, msg: '设置保存成功' })
       }
       throw new Error(`unexpected request: ${init.method} ${url.pathname}`)
@@ -566,16 +684,12 @@ describe('typed certificate API', () => {
         notifications: { email: 'failures-only', customWebhook: 'all' },
         localDeployment: {
           defaultMode: 'quick',
-          pemCertificatePathTemplate: '/srv/certs/{domain}/fullchain.pem',
-          pemPrivateKeyPathTemplate: '/srv/certs/{domain}/privkey.pem',
-          pfxPathTemplate: '/srv/certs/{domain}/certificate.pfx',
-          commandTemplate: 'nginx -s reload',
+          defaultTemplateId: 'local-default',
+          templates: localTemplates,
         },
         dcvDelegation: {
-          allowedDomains: ['example.com'],
-          domainMatchMode: 'suffix',
-          targetRecordNameTemplate: '{domainWithDashes}.cname',
-          forceTargetRecordNameTemplate: true,
+          defaultTemplateId: 'dcv-default',
+          templates: dcvTemplates,
         },
       },
     })
@@ -588,16 +702,26 @@ describe('typed certificate API', () => {
         },
         localDeployment: {
           defaultMode: 'quick',
-          pemCertificatePathTemplate: '/etc/ssl/{domain}/fullchain.pem',
-          pemPrivateKeyPathTemplate: '/etc/ssl/{domain}/privkey.pem',
-          pfxPathTemplate: '/etc/ssl/{domain}/certificate.pfx',
-          commandTemplate: '',
+          defaultTemplateId: 'default',
+          templates: [{
+            id: 'default',
+            name: '默认模板',
+            pemCertificatePathTemplate: '/etc/ssl/{domain}/fullchain.pem',
+            pemPrivateKeyPathTemplate: '/etc/ssl/{domain}/privkey.pem',
+            pfxPathTemplate: '/etc/ssl/{domain}/certificate.pfx',
+            commandTemplate: '',
+          }],
         },
         dcvDelegation: {
-          allowedDomains: [],
-          domainMatchMode: 'suffix',
-          targetRecordNameTemplate: '{domainWithDashes}.cname',
-          forceTargetRecordNameTemplate: false,
+          defaultTemplateId: 'default',
+          templates: [{
+            id: 'default',
+            name: '默认策略',
+            allowedDomains: [],
+            domainMatchMode: 'suffix',
+            targetRecordNameTemplate: '{domainWithDashes}.cname',
+            forceTargetRecordNameTemplate: false,
+          }],
         },
       },
     })

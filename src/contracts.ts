@@ -606,6 +606,24 @@ export type CertificateCnameProxy = {
 
 export type CertificateNotificationMode = 'off' | 'all' | 'failures-only'
 
+export type CertificateLocalDeploymentTemplate = {
+  id: string
+  name: string
+  pemCertificatePathTemplate: string
+  pemPrivateKeyPathTemplate: string
+  pfxPathTemplate: string
+  commandTemplate: string
+}
+
+export type CertificateDcvDelegationTemplate = {
+  id: string
+  name: string
+  allowedDomains: string[]
+  domainMatchMode: 'exact' | 'suffix'
+  targetRecordNameTemplate: string
+  forceTargetRecordNameTemplate: boolean
+}
+
 export type CertificateSettings = {
   renewBeforeDays: number
   deploymentWindow: { startHour: number; endHour: number }
@@ -618,16 +636,12 @@ export type CertificateSettings = {
   }
   localDeployment: {
     defaultMode: 'quick' | 'custom'
-    pemCertificatePathTemplate: string
-    pemPrivateKeyPathTemplate: string
-    pfxPathTemplate: string
-    commandTemplate: string
+    defaultTemplateId: string
+    templates: CertificateLocalDeploymentTemplate[]
   }
   dcvDelegation: {
-    allowedDomains: string[]
-    domainMatchMode: 'exact' | 'suffix'
-    targetRecordNameTemplate: string
-    forceTargetRecordNameTemplate: boolean
+    defaultTemplateId: string
+    templates: CertificateDcvDelegationTemplate[]
   }
 }
 

@@ -1,7 +1,12 @@
 import { z } from 'zod'
 
 import type { AppConfig } from '../../config.js'
-import type { CertificateCnameProxy, CertificateSettings, PageMeta } from '../../contracts.js'
+import type {
+  CertificateCnameProxy,
+  CertificateDcvDelegationTemplate,
+  CertificateSettings,
+  PageMeta,
+} from '../../contracts.js'
 import { ApiError } from '../../errors.js'
 import type { DnsmgrClient, RequestContext } from '../../upstream/client.js'
 import { requireUpstreamHtml } from '../../upstream/legacy.js'
@@ -18,6 +23,7 @@ import { namedSelectOptions } from './html-state.js'
 import { executeLegacyOperation } from './operations.js'
 
 const PositiveId = z.coerce.number().int().positive()
+const TemplateIdSchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
 
 const CnameSortMap = {
   id: 'id',
@@ -50,6 +56,7 @@ export const CertificateCnameCreateSchema = z.object({
   domain: DomainNameSchema,
   targetRecordName: RecordNameSchema,
   targetDomainId: PositiveId,
+  dcvTemplateId: TemplateIdSchema.optional(),
 }).strict()
 
 export const CertificateCnameUpdateSchema = z.object({
@@ -70,27 +77,41 @@ export function renderDcvTargetRecordName(template: string, domain: string): str
 
 function domainAllowed(
   domain: string,
-  settings: CertificateSettings['dcvDelegation'],
+  template: CertificateDcvDelegationTemplate,
 ): boolean {
-  if (settings.allowedDomains.length === 0) return true
+  if (template.allowedDomains.length === 0) return true
   const normalized = normalizedDelegationDomain(domain)
-  return settings.allowedDomains.some((allowed) => {
+  return template.allowedDomains.some((allowed) => {
     const candidate = normalizedDelegationDomain(allowed)
     return normalized === candidate
-      || (settings.domainMatchMode === 'suffix' && normalized.endsWith(`.${candidate}`))
+      || (template.domainMatchMode === 'suffix' && normalized.endsWith(`.${candidate}`))
   })
+}
+
+function selectedDcvTemplate(
+  settings: CertificateSettings['dcvDelegation'],
+  requestedTemplateId?: string,
+): CertificateDcvDelegationTemplate {
+  const templateId = requestedTemplateId ?? settings.defaultTemplateId
+  const template = settings.templates.find((candidate) => candidate.id === templateId)
+  if (!template) {
+    throw new ApiError(422, 'DCV_TEMPLATE_NOT_FOUND', '所选 DCV 托管策略不存在')
+  }
+  return template
 }
 
 export function resolveDcvTargetRecordName(
   domain: string,
   requestedRecordName: string,
   settings: CertificateSettings['dcvDelegation'],
+  requestedTemplateId?: string,
 ): string {
-  if (!domainAllowed(domain, settings)) {
+  const template = selectedDcvTemplate(settings, requestedTemplateId)
+  if (!domainAllowed(domain, template)) {
     throw new ApiError(422, 'DCV_DOMAIN_NOT_ALLOWED', '该证书域名不在允许托管的域名范围内')
   }
-  return settings.forceTargetRecordNameTemplate
-    ? RecordNameSchema.parse(renderDcvTargetRecordName(settings.targetRecordNameTemplate, domain))
+  return template.forceTargetRecordNameTemplate
+    ? RecordNameSchema.parse(renderDcvTargetRecordName(template.targetRecordNameTemplate, domain))
     : requestedRecordName
 }
 
@@ -174,7 +195,12 @@ export async function createCertificateCname(
   settings: CertificateSettings['dcvDelegation'],
 ) {
   const body = CertificateCnameCreateSchema.parse(rawBody)
-  const targetRecordName = resolveDcvTargetRecordName(body.domain, body.targetRecordName, settings)
+  const targetRecordName = resolveDcvTargetRecordName(
+    body.domain,
+    body.targetRecordName,
+    settings,
+    body.dcvTemplateId,
+  )
   const result = await executeLegacyOperation(client, config, context, 'certificateCnames.create', {
     form: { domain: body.domain, rr: targetRecordName, did: body.targetDomainId },
   })
