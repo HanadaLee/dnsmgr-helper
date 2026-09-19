@@ -72,6 +72,53 @@ export class DatabaseClient {
     return Object.fromEntries(rows.map((row) => [row.key, row.value ?? '']))
   }
 
+  async updateConfigJsonObjectEntry(
+    key: string,
+    entryKey: string,
+    entryValue: string | null,
+  ): Promise<void> {
+    if (!this.pool) throw new Error('数据库连接未启用')
+
+    const connection = await this.pool.getConnection()
+    try {
+      await connection.beginTransaction()
+      const rows = await connection.query<Array<RowDataPacket & { value: string | null }>>(
+        `SELECT \`value\` FROM \`${this.configTable}\` WHERE \`key\` = ? LIMIT 1 FOR UPDATE`,
+        [key],
+      )
+      let entries: Record<string, string> = {}
+      const stored = rows[0][0]?.value
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as unknown
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            entries = Object.fromEntries(Object.entries(parsed).flatMap(([storedKey, value]) => (
+              typeof value === 'string' ? [[storedKey, value]] : []
+            )))
+          }
+        } catch {
+          throw new Error('DCV 模板绑定配置格式不合法')
+        }
+      }
+      if (entryValue === null) delete entries[entryKey]
+      else entries[entryKey] = entryValue
+      const value = JSON.stringify(entries)
+      if (Buffer.byteLength(value, 'utf8') > 60_000) {
+        throw new Error('DCV 模板绑定数量过多')
+      }
+      await connection.query(
+        `INSERT INTO \`${this.configTable}\` (\`key\`, \`value\`) VALUES (?, ?) ON DUPLICATE KEY UPDATE \`value\` = ?`,
+        [key, value, value],
+      )
+      await connection.commit()
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    } finally {
+      connection.release()
+    }
+  }
+
   async prepareManagedUserSession(
     username: string,
     clientIp = '',

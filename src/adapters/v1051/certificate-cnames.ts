@@ -25,6 +25,12 @@ import { executeLegacyOperation } from './operations.js'
 const PositiveId = z.coerce.number().int().positive()
 const TemplateIdSchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
 
+export const CertificateCnameTemplateBindingsConfigKey = 'helper_cert_dcv_bindings'
+
+type ConfigValueReader = {
+  getConfigValues(keys: string[]): Promise<Record<string, string>>
+}
+
 const CnameSortMap = {
   id: 'id',
   domain: 'domain',
@@ -68,12 +74,58 @@ export const CertificateCnameCreateSchema = z.object({
 })
 
 export const CertificateCnameUpdateSchema = z.object({
-  targetRecordName: RecordNameSchema,
-  targetDomainId: PositiveId,
+  domain: DomainNameSchema.optional(),
+  targetRecordName: RecordNameSchema.optional(),
+  targetDomainId: PositiveId.optional(),
+  dcvTemplateId: TemplateIdSchema.nullable().optional(),
+}).strict().superRefine((value, context) => {
+  if (typeof value.dcvTemplateId === 'string') {
+    if (!value.domain) {
+      context.addIssue({ code: 'custom', path: ['domain'], message: '使用模板时必须提供证书域名' })
+    }
+    return
+  }
+  if (!value.targetRecordName) {
+    context.addIssue({ code: 'custom', path: ['targetRecordName'], message: '自定义模式必须填写目标主机记录' })
+  }
+  if (!value.targetDomainId) {
+    context.addIssue({ code: 'custom', path: ['targetDomainId'], message: '自定义模式必须选择目标域名' })
+  }
+  if (value.dcvTemplateId === null && !value.domain) {
+    context.addIssue({ code: 'custom', path: ['domain'], message: '保存自定义配置时必须提供证书域名' })
+  }
+})
+
+export const CertificateCnameDeleteSchema = z.object({
+  domain: DomainNameSchema.optional(),
 }).strict()
 
 function normalizedDelegationDomain(value: string): string {
   return value.trim().toLowerCase().replace(/^\*\./, '').replace(/\.$/, '')
+}
+
+export function certificateCnameBindingKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\.$/, '')
+}
+
+export async function getCertificateCnameTemplateBindings(
+  reader: ConfigValueReader,
+): Promise<Record<string, string>> {
+  const stored = (await reader.getConfigValues([CertificateCnameTemplateBindingsConfigKey]))[
+    CertificateCnameTemplateBindingsConfigKey
+  ]
+  if (!stored) return {}
+  try {
+    const parsed = JSON.parse(stored) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(Object.entries(parsed).flatMap(([domain, templateId]) => {
+      const result = TemplateIdSchema.safeParse(templateId)
+      const key = certificateCnameBindingKey(domain)
+      return result.success && key ? [[key, result.data]] : []
+    }))
+  } catch {
+    return {}
+  }
 }
 
 export function renderDcvTargetRecordName(template: string, domain: string): string {
@@ -136,7 +188,10 @@ export function resolveDcvTarget(
   }
 }
 
-function normalizeCertificateCname(row: LegacyObject): CertificateCnameProxy {
+function normalizeCertificateCname(
+  row: LegacyObject,
+  templateBindings: Record<string, string>,
+): CertificateCnameProxy {
   const id = requiredPositiveInteger(
     row.id,
     'UPSTREAM_INVALID_CERTIFICATE_CNAME',
@@ -159,6 +214,9 @@ function normalizeCertificateCname(row: LegacyObject): CertificateCnameProxy {
   return {
     id,
     domain,
+    ...(templateBindings[certificateCnameBindingKey(domain)]
+      ? { templateId: templateBindings[certificateCnameBindingKey(domain)] }
+      : {}),
     challengeHost,
     targetDomainId,
     targetDomain,
@@ -188,6 +246,7 @@ export async function listCertificateCnames(
   config: AppConfig,
   context: RequestContext,
   rawQuery: unknown,
+  templateBindings: Record<string, string> = {},
 ): Promise<{ data: CertificateCnameProxy[]; meta: PageMeta }> {
   const query = CertificateCnamesQuerySchema.parse(rawQuery)
   const result = await executeLegacyOperation(client, config, context, 'certificateCnames.list', {
@@ -204,7 +263,7 @@ export async function listCertificateCnames(
     query.page,
     query.pageSize,
     '原 dnsmgr 的 DCV 托管校验列表格式不兼容',
-    normalizeCertificateCname,
+    (row) => normalizeCertificateCname(row, templateBindings),
   )
 }
 
@@ -226,7 +285,13 @@ export async function createCertificateCname(
   const result = await executeLegacyOperation(client, config, context, 'certificateCnames.create', {
     form: { domain: body.domain, rr: target.targetRecordName, did: target.targetDomainId },
   })
-  return operationMessage(result.message)
+  return {
+    ...operationMessage(result.message),
+    domain: certificateCnameBindingKey(body.domain),
+    templateId: body.dcvTemplateId === null
+      ? null
+      : body.dcvTemplateId ?? settings.defaultTemplateId,
+  }
 }
 
 export async function updateCertificateCname(
@@ -235,12 +300,27 @@ export async function updateCertificateCname(
   context: RequestContext,
   cnameId: number,
   rawBody: unknown,
+  settings: CertificateSettings['dcvDelegation'],
 ) {
   const body = CertificateCnameUpdateSchema.parse(rawBody)
+  const target = typeof body.dcvTemplateId === 'string'
+    ? resolveDcvTarget(body.domain!, undefined, undefined, settings, body.dcvTemplateId)
+    : {
+        targetRecordName: RecordNameSchema.parse(body.targetRecordName),
+        targetDomainId: PositiveId.parse(body.targetDomainId),
+      }
   const result = await executeLegacyOperation(client, config, context, 'certificateCnames.update', {
-    form: { id: cnameId, rr: body.targetRecordName, did: body.targetDomainId },
+    form: { id: cnameId, rr: target.targetRecordName, did: target.targetDomainId },
   })
-  return operationMessage(result.message)
+  return {
+    ...operationMessage(result.message),
+    ...(body.domain && body.dcvTemplateId !== undefined
+      ? {
+          domain: certificateCnameBindingKey(body.domain),
+          templateId: body.dcvTemplateId,
+        }
+      : {}),
+  }
 }
 
 export async function deleteCertificateCname(
@@ -248,11 +328,16 @@ export async function deleteCertificateCname(
   config: AppConfig,
   context: RequestContext,
   cnameId: number,
+  rawBody: unknown,
 ) {
+  const body = CertificateCnameDeleteSchema.parse(rawBody ?? {})
   const result = await executeLegacyOperation(client, config, context, 'certificateCnames.delete', {
     form: { id: cnameId },
   })
-  return operationMessage(result.message)
+  return {
+    ...operationMessage(result.message),
+    ...(body.domain ? { domain: certificateCnameBindingKey(body.domain) } : {}),
+  }
 }
 
 export async function checkCertificateCname(

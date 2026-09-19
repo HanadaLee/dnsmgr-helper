@@ -394,7 +394,16 @@ DCV 模板保存 CNAME 目标域名、目标主机记录模板以及可选的允
 }
 ```
 
-选择“自定义”时提交 `dcvTemplateId: null`，并同时提交 `targetDomainId` 与 `targetRecordName`。允许托管域名固定包含其子域名；留空表示不限制，不再提供容易产生冲突的匹配模式和强制开关。
+使用模板编辑时同样提交证书域名和模板 ID；helper 会重新按模板生成目标，并保存该记录选择的模板：
+
+```json
+{
+  "domain": "www.example.com",
+  "dcvTemplateId": "default"
+}
+```
+
+选择“自定义”时提交 `dcvTemplateId: null` 以及 `targetDomainId`、`targetRecordName`。列表中的 `templateId` 是 helper 用于恢复编辑选择的内部元数据；删除时可同时提交 `{ "domain": "www.example.com" }` 清理该绑定。历史记录没有模板元数据，因此编辑时按“自定义”处理。允许托管域名固定包含其子域名；留空表示不限制，不再提供容易产生冲突的匹配模式和强制开关。
 
 ## AxisNow 调度管理
 

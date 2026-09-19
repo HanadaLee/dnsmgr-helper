@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildApp } from '../src/app.js'
-import { resolveDcvTarget } from '../src/adapters/v1051/certificate-cnames.js'
+import {
+  CertificateCnameTemplateBindingsConfigKey,
+  CertificateCnameUpdateSchema,
+  getCertificateCnameTemplateBindings,
+  resolveDcvTarget,
+} from '../src/adapters/v1051/certificate-cnames.js'
 import {
   CertificateAutomationConfigKeys,
   CertificateSettingsMutationSchema,
@@ -58,7 +63,32 @@ const headers = { cookie: 'user_token=legacy-certificate-session' }
 
 describe('typed certificate API', () => {
   it('keeps helper setting keys within the dnsmgr config table limit', () => {
-    expect(Object.values(CertificateAutomationConfigKeys).every((key) => key.length <= 32)).toBe(true)
+    expect([
+      ...Object.values(CertificateAutomationConfigKeys),
+      CertificateCnameTemplateBindingsConfigKey,
+    ].every((key) => key.length <= 32)).toBe(true)
+  })
+
+  it('restores saved DCV template selections and keeps legacy custom edits valid', async () => {
+    const bindings = await getCertificateCnameTemplateBindings({
+      getConfigValues: async () => ({
+        [CertificateCnameTemplateBindingsConfigKey]: JSON.stringify({
+          'Example.COM.': 'public',
+          'invalid.example': 'contains spaces',
+          'ignored.example': 42,
+        }),
+      }),
+    })
+
+    expect(bindings).toEqual({ 'example.com': 'public' })
+    expect(CertificateCnameUpdateSchema.safeParse({
+      domain: 'example.com',
+      dcvTemplateId: 'public',
+    }).success).toBe(true)
+    expect(CertificateCnameUpdateSchema.safeParse({
+      targetRecordName: 'custom-record',
+      targetDomainId: 42,
+    }).success).toBe(true)
   })
 
   it('rejects duplicate template names and missing defaults', () => {

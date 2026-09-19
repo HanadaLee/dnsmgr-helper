@@ -49,10 +49,12 @@ import {
   updateAxisNowTag,
 } from './adapters/v1051/axisnow.js'
 import {
+  CertificateCnameTemplateBindingsConfigKey,
   checkCertificateCname,
   createCertificateCname,
   deleteCertificateCname,
   getCertificateCnameForm,
+  getCertificateCnameTemplateBindings,
   listCertificateCnames,
   updateCertificateCname,
 } from './adapters/v1051/certificate-cnames.js'
@@ -1644,46 +1646,75 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   }))
 
   app.get('/api/web/v1/certificate-cnames', async (request) => {
+    const templateBindings = await getCertificateCnameTemplateBindings(database)
     const result = await listCertificateCnames(
       client,
       config,
       upstreamContext(request, config),
       request.query,
+      templateBindings,
     )
     return { code: 'OK', ...result }
   })
 
-  app.post('/api/web/v1/certificate-cnames', async (request) => ({
-    code: 'OK',
-    ...await createCertificateCname(
+  app.post('/api/web/v1/certificate-cnames', async (request) => {
+    const result = await createCertificateCname(
       client,
       config,
       upstreamContext(request, config),
       request.body,
       (await getCertificateAutomationSettings(database)).dcvDelegation,
-    ),
-  }))
+    )
+    if (database.enabled) {
+      await database.updateConfigJsonObjectEntry(
+        CertificateCnameTemplateBindingsConfigKey,
+        result.domain,
+        result.templateId,
+      )
+    }
+    const { domain: _domain, templateId: _templateId, ...operation } = result
+    return { code: 'OK', ...operation }
+  })
 
   app.put('/api/web/v1/certificate-cnames/:cnameId', async (request) => {
     const params = CertificateCnameIdParamsSchema.parse(request.params)
-    return {
-      code: 'OK',
-      ...await updateCertificateCname(
-        client,
-        config,
-        upstreamContext(request, config),
-        params.cnameId,
-        request.body,
-      ),
+    const result = await updateCertificateCname(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.cnameId,
+      request.body,
+      (await getCertificateAutomationSettings(database)).dcvDelegation,
+    )
+    if (database.enabled && result.domain) {
+      await database.updateConfigJsonObjectEntry(
+        CertificateCnameTemplateBindingsConfigKey,
+        result.domain,
+        result.templateId ?? null,
+      )
     }
+    const { domain: _domain, templateId: _templateId, ...operation } = result
+    return { code: 'OK', ...operation }
   })
 
   app.delete('/api/web/v1/certificate-cnames/:cnameId', async (request) => {
     const params = CertificateCnameIdParamsSchema.parse(request.params)
-    return {
-      code: 'OK',
-      ...await deleteCertificateCname(client, config, upstreamContext(request, config), params.cnameId),
+    const result = await deleteCertificateCname(
+      client,
+      config,
+      upstreamContext(request, config),
+      params.cnameId,
+      request.body,
+    )
+    if (database.enabled && result.domain) {
+      await database.updateConfigJsonObjectEntry(
+        CertificateCnameTemplateBindingsConfigKey,
+        result.domain,
+        null,
+      )
     }
+    const { domain: _domain, ...operation } = result
+    return { code: 'OK', ...operation }
   })
 
   app.post('/api/web/v1/certificate-cnames/:cnameId/check', async (request) => {
