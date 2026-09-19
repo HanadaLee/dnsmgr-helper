@@ -4,6 +4,8 @@ import { buildApp, requestUrlForLog } from '../src/app.js'
 import { createCasSession, verifyCasProfile } from '../src/auth/cas.js'
 import { parseConfig, type AppConfig } from '../src/config.js'
 import type { CasProfile } from '../src/contracts.js'
+import { DatabaseClient } from '../src/database/client.js'
+import { DNSMGR_BRIDGE_COOKIE, DNSMGR_SESSION_COOKIE } from '../src/dnsmgr-constants.js'
 import type { FetchLike } from '../src/upstream/client.js'
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = []
@@ -69,10 +71,6 @@ function config(overrides: ConfigOverrides = {}): AppConfig {
     legacySso: {
       adminUser: 'admin',
       managedPassword: 'unit-test-managed-password',
-      loginPath: '/login',
-      registerPath: '/user/op/act/add',
-      sessionCookie: 'user_token',
-      bridgeCookie: 'dnsmgr_helper_legacy_session',
     },
     database: {
       enabled: false,
@@ -121,7 +119,7 @@ const profile: CasProfile = {
 
 async function authenticatedCookies(appConfig: AppConfig, legacyToken = 'legacy-session') {
   const helperToken = await createCasSession(profile, appConfig)
-  return `${appConfig.cas.sessionCookie}=${encodeURIComponent(helperToken)}; ${appConfig.legacySso.bridgeCookie}=${encodeURIComponent(legacyToken)}`
+  return `${appConfig.cas.sessionCookie}=${encodeURIComponent(helperToken)}; ${DNSMGR_BRIDGE_COOKIE}=${encodeURIComponent(legacyToken)}`
 }
 
 function casSuccessXml(name = 'hanada') {
@@ -261,6 +259,30 @@ describe('helper-owned CAS flow', () => {
 
     const cookieHeader = cookies.map((cookie) => cookie.split(';')[0]).join('; ')
     await expect(verifyCasProfile(cookieHeader, appConfig)).resolves.toMatchObject(profile)
+  })
+
+  it('uses the database to issue the dnsmgr session without managed credentials', async () => {
+    const prepareSession = vi.spyOn(DatabaseClient.prototype, 'prepareManagedUserSession')
+      .mockResolvedValue({ id: 42, password: '$external-password-hash', systemKey: 'system-key' })
+    const appConfig = config({ database: { enabled: true } })
+    const fetcher = vi.fn(fakeFetch((url) => {
+      expect(url.hostname).toBe('cas.test')
+      return new Response(casSuccessXml(), { headers: { 'content-type': 'application/xml' } })
+    })) as unknown as FetchLike
+    const app = await appWith(fetcher, appConfig)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/cas/callback?ticket=ST-database&returnTo=%2Fdomains',
+    })
+
+    expect(response.statusCode).toBe(302)
+    expect(response.headers.location).toBe('/domains')
+    expect(prepareSession).toHaveBeenCalledWith('hanada', '127.0.0.1')
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    const cookies = responseCookies(response).join('\n')
+    expect(cookies).toContain(`${DNSMGR_BRIDGE_COOKIE}=`)
+    expect(cookies).toContain(`${DNSMGR_SESSION_COOKIE}=`)
   })
 
   it('creates a missing dnsmgr user with the configured administrator and retries login', async () => {
@@ -458,7 +480,7 @@ describe('session compatibility', () => {
     const cookie = [
       `${appConfig.cas.sessionCookie}=${encodeURIComponent(validHelperToken)}`,
       `${appConfig.cas.sessionCookie}=stale-session`,
-      `${appConfig.legacySso.bridgeCookie}=legacy-session`,
+      `${DNSMGR_BRIDGE_COOKIE}=legacy-session`,
     ].join('; ')
     const fetcher = fakeFetch((_url, init) => {
       expect(new Headers(init.headers).get('cookie')).toBe('user_token=legacy-session')
@@ -491,7 +513,7 @@ describe('session compatibility', () => {
     const app = await appWith(fetcher, appConfig)
     const cookie = [
       await authenticatedCookies(appConfig, 'bridge-session'),
-      `${appConfig.legacySso.sessionCookie}=stale-session`,
+      `${DNSMGR_SESSION_COOKIE}=stale-session`,
     ].join('; ')
 
     const response = await app.inject({

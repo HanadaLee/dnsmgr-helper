@@ -63,15 +63,16 @@ helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原
     "baseUrl": "https://cas.example.com/cas/organization/application/",
     "sessionSecret": "<至少32字符随机值>"
   },
-  "legacySso": {
-    "adminUser": "<dnsmgr管理员>",
-    "managedPassword": "<托管密码>",
-    "bridgeCookie": "dnsmgr_helper_legacy_session"
+  "database": {
+    "enabled": true,
+    "thinkphpEnvPath": "/app/config/thinkphp.env"
   }
 }
 ```
 
 以上只是字段示意，不是完整配置文件。应在完整 JSON 上修改，并运行 `npm run config:check -- config/dnsmgr-helper.json`。
+
+启用数据库后，helper 直接映射 dnsmgr 用户并签发其会话，不需要管理员用户名或托管密码。无数据库部署仍可配置 `legacySso.adminUser` 和 `legacySso.managedPassword` 作为兼容回退。dnsmgr 登录路径、用户创建路径和 Cookie 名称均为固定协议值。
 
 ## 无中断迁移顺序
 

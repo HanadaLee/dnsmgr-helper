@@ -39,14 +39,6 @@
       "avatar": "avatar"
     }
   },
-  "legacySso": {
-    "adminUser": "",
-    "managedPassword": "",
-    "loginPath": "/login",
-    "registerPath": "/user/op/act/add",
-    "sessionCookie": "user_token",
-    "bridgeCookie": "dnsmgr_helper_legacy_session"
-  },
   "database": {
     "enabled": false,
     "thinkphpEnvPath": "/app/config/thinkphp.env",

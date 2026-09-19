@@ -245,6 +245,7 @@ import { LegacySsoService } from './auth/legacy-sso.js'
 import { loadConfig, type AppConfig } from './config.js'
 import type { CasProfile } from './contracts.js'
 import { DatabaseClient } from './database/client.js'
+import { DNSMGR_BRIDGE_COOKIE, DNSMGR_SESSION_COOKIE } from './dnsmgr-constants.js'
 import { ApiError, registerErrorHandler } from './errors.js'
 import { upstreamContext, upstreamRequestMetadata } from './request-context.js'
 import { DnsmgrClient, type FetchLike, type UpstreamResult } from './upstream/client.js'
@@ -376,8 +377,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   })
   const client = new DnsmgrClient(config, options.fetcher)
   const casClient = new CasClient(config, options.fetcher)
-  const legacySso = new LegacySsoService(config, client)
   const database = new DatabaseClient(config.database)
+  const legacySso = new LegacySsoService(config, client, database)
   const casProfiles = new WeakMap<object, CasProfile | undefined>()
 
   await app.register(helmet, {
@@ -418,9 +419,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         casSessionStatus: verification.status,
         helperSessionCookieCount: verification.candidateCount,
         bridgeSessionCookiePresent:
-          cookieValues(request.headers.cookie, config.legacySso.bridgeCookie).length > 0,
+          cookieValues(request.headers.cookie, DNSMGR_BRIDGE_COOKIE).length > 0,
         legacySessionCookiePresent:
-          cookieValues(request.headers.cookie, config.legacySso.sessionCookie).length > 0,
+          cookieValues(request.headers.cookie, DNSMGR_SESSION_COOKIE).length > 0,
       }, 'CAS session cookie rejected')
       throw authenticationError(config, 'helper-session')
     }
@@ -515,12 +516,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         cookieOptions(config, sessionMaxAge),
       ),
       serializeHttpOnlyCookie(
-        config.legacySso.bridgeCookie,
+        DNSMGR_BRIDGE_COOKIE,
         legacyToken,
         cookieOptions(config, sessionMaxAge),
       ),
       serializeHttpOnlyCookie(
-        config.legacySso.sessionCookie,
+        DNSMGR_SESSION_COOKIE,
         legacyToken,
         cookieOptions(config, sessionMaxAge),
       ),
@@ -531,8 +532,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const logoutHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
     reply.header('set-cookie', [
       serializeHttpOnlyCookie(config.cas.sessionCookie, '', cookieOptions(config, 0)),
-      serializeHttpOnlyCookie(config.legacySso.bridgeCookie, '', cookieOptions(config, 0)),
-      serializeHttpOnlyCookie(config.legacySso.sessionCookie, '', cookieOptions(config, 0)),
+      serializeHttpOnlyCookie(DNSMGR_BRIDGE_COOKIE, '', cookieOptions(config, 0)),
+      serializeHttpOnlyCookie(DNSMGR_SESSION_COOKIE, '', cookieOptions(config, 0)),
     ])
     if (!config.cas.enabled) return redirect(reply, config.cas.logoutRedirectPath)
     return redirect(reply, casLogoutUrl(config).href)
@@ -582,18 +583,18 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       request.query,
     )
     const legacyToken = isDomainLoginRedirect(result.location)
-      ? upstreamCookieValue(result, config.legacySso.sessionCookie)
+      ? upstreamCookieValue(result, DNSMGR_SESSION_COOKIE)
       : undefined
     if (legacyToken) {
       const maxAge = config.cas.sessionTtlSeconds
       const cookies = [
         serializeHttpOnlyCookie(
-          config.legacySso.bridgeCookie,
+          DNSMGR_BRIDGE_COOKIE,
           legacyToken,
           cookieOptions(config, maxAge),
         ),
         serializeHttpOnlyCookie(
-          config.legacySso.sessionCookie,
+          DNSMGR_SESSION_COOKIE,
           legacyToken,
           cookieOptions(config, maxAge),
         ),

@@ -15,6 +15,34 @@ afterEach(async () => {
 })
 
 describe('ThinkPHP database configuration compatibility', () => {
+  it('does not require managed dnsmgr credentials when database access is enabled', () => {
+    const config = parseConfig({
+      server: { environment: 'test', publicUrl: 'https://dns.example.com/' },
+      upstream: { url: 'http://127.0.0.1:19101/' },
+      cas: {
+        enabled: true,
+        baseUrl: 'https://cas.example.com/cas/',
+        sessionSecret: '0123456789abcdef0123456789abcdef',
+      },
+      database: { enabled: true },
+    })
+
+    expect(config.legacySso).toEqual({})
+  })
+
+  it('keeps managed dnsmgr credentials mandatory for the no-database fallback', () => {
+    expect(() => parseConfig({
+      server: { environment: 'test', publicUrl: 'https://dns.example.com/' },
+      upstream: { url: 'http://127.0.0.1:19101/' },
+      cas: {
+        enabled: true,
+        baseUrl: 'https://cas.example.com/cas/',
+        sessionSecret: '0123456789abcdef0123456789abcdef',
+      },
+      database: { enabled: false },
+    })).toThrow()
+  })
+
   it('uses the stock dnsmgr table prefix unless it is explicitly overridden', () => {
     const base = {
       server: { environment: 'test', publicUrl: 'https://dns.example.com/' },

@@ -10,7 +10,7 @@ process.stdout.write(`${JSON.stringify({
   upstreamVersion: config.upstream.version,
   releaseCheckEnabled: config.releaseCheck.enabled,
   casEnabled: config.cas.enabled,
-  legacyBridgeCookie: config.legacySso.bridgeCookie,
+  dnsmgrAuthMode: config.database.enabled ? 'database' : 'legacy-http',
   databaseEnabled: config.database.enabled,
   databaseConfigSource: !config.database.enabled
     ? 'disabled'

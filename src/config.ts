@@ -3,6 +3,8 @@ import path from 'node:path'
 
 import { z } from 'zod'
 
+import { DNSMGR_BRIDGE_COOKIE, DNSMGR_SESSION_COOKIE } from './dnsmgr-constants.js'
+
 const OptionalNonEmptyString = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
   z.string().min(1).optional(),
@@ -85,11 +87,7 @@ const ConfigSchema = z.object({
   legacySso: z.object({
     adminUser: OptionalNonEmptyString,
     managedPassword: OptionalNonEmptyString,
-    loginPath: RelativePath.default('/login'),
-    registerPath: RelativePath.default('/user/op/act/add'),
-    sessionCookie: CookieName.default('user_token'),
-    bridgeCookie: CookieName.default('dnsmgr_helper_legacy_session'),
-  }),
+  }).default({}),
   database: z.object({
     enabled: z.boolean().default(false),
     thinkphpEnvPath: OptionalNonEmptyString,
@@ -112,14 +110,14 @@ const ConfigSchema = z.object({
   }
   const cookieNames = [
     value.cas.sessionCookie,
-    value.legacySso.sessionCookie,
-    value.legacySso.bridgeCookie,
+    DNSMGR_SESSION_COOKIE,
+    DNSMGR_BRIDGE_COOKIE,
   ]
   if (new Set(cookieNames).size !== cookieNames.length) {
     context.addIssue({
       code: 'custom',
-      path: ['legacySso', 'bridgeCookie'],
-      message: 'CAS Session、原 dnsmgr 和桥接 Cookie 名称不能重复',
+      path: ['cas', 'sessionCookie'],
+      message: 'CAS Session Cookie 不能与固定的 dnsmgr Cookie 名称重复',
     })
   }
   if (value.cas.cookieSameSite === 'none' && !value.cas.cookieSecure) {
@@ -137,10 +135,10 @@ const ConfigSchema = z.object({
       message: '启用 CAS 时 sessionSecret 至少需要 32 个字符',
     })
   }
-  if (!value.legacySso.adminUser) {
+  if (!value.database.enabled && !value.legacySso.adminUser) {
     context.addIssue({ code: 'custom', path: ['legacySso', 'adminUser'], message: '启用 CAS 时必须配置管理员用户' })
   }
-  if (!value.legacySso.managedPassword) {
+  if (!value.database.enabled && !value.legacySso.managedPassword) {
     context.addIssue({ code: 'custom', path: ['legacySso', 'managedPassword'], message: '启用 CAS 时必须配置托管密码' })
   }
 })

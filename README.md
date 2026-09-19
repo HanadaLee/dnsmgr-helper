@@ -49,8 +49,10 @@ npm run config:check -- config/dnsmgr-helper.json
 - `server.publicUrl`：浏览器访问 dnsmgr 的公开站点根地址
 - `cas.baseUrl`：CAS 应用根地址，helper 会追加 `login`、`serviceValidate` 和 `logout`
 - `cas.sessionSecret`：至少 32 个字符的随机密钥，只由 helper 使用
-- `legacySso.adminUser`：原 dnsmgr 管理员用户名
-- `legacySso.managedPassword`：所有自动映射用户使用的托管密码
+
+数据库启用时，helper 会直接创建或读取 dnsmgr 用户并签发 `user_token`，不需要配置管理员用户名或托管密码。只有不启用数据库时，才需要填写 `legacySso.adminUser` 和 `legacySso.managedPassword`，通过原 dnsmgr HTTP 接口完成兼容登录。
+
+原 dnsmgr 的登录路径、用户创建路径和 `user_token` Cookie 名称均为协议固定值，不提供配置项；helper 的桥接 Cookie 名称同样固定。
 
 `cas.validationUrl` 可选，用于把服务端验票请求发送到内网地址；浏览器重定向仍使用公开的 `cas.baseUrl`。如内网地址需要指定 Host，可填写 `cas.validationHost`。
 
