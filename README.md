@@ -4,6 +4,8 @@
 
 当前业务接口仍通过原 dnsmgr 控制器读取数据，因此 DNS 平台权限和供应商差异继续由原系统处理。数据库连接是可选基础能力，尚未替代现有域名与解析记录适配器。
 
+> 兼容性要求：生产环境应使用 [HanadaLee/dnsmgr](https://github.com/HanadaLee/dnsmgr) 的 `ext` 分支。helper 的 AxisNow、证书模板和部分兼容接口与该分支同步维护；直接搭配原版 `main` 可能缺少字段或控制器能力，产生不可预期的问题。
+
 ## 已实现能力
 
 - CAS 登录、回调、退出和签名 Session Cookie
@@ -150,7 +152,7 @@ docker compose ps
 也可以在本地构建后指定镜像：
 
 ```powershell
-docker build --build-arg APP_VERSION=0.8.3 -t dnsmgr-helper:local .
+docker build --build-arg APP_VERSION=0.8.20 -t dnsmgr-helper:local .
 $env:DNSMGR_HELPER_IMAGE = 'dnsmgr-helper:local'
 docker compose up -d
 ```
@@ -161,23 +163,17 @@ Compose 使用 Linux host 网络。这与静态配置的回环监听方式配套
 
 helper 访问原 dnsmgr 时会分别输出 `dnsmgr upstream request` 和 `dnsmgr upstream response` 日志，包含父请求 ID、方法、上游路径、请求模式、是否携带会话、响应状态、耗时、响应大小和重定向路径。日志不会记录 Cookie 值、托管密码、POST 表单或响应正文；入口日志还会隐藏 `/quicklogin` 的完整查询串和回调中的 Ticket。会话接口探测 dnsmgr 首页时使用 `document` 模式，不会携带 `X-Requested-With`；登录和数据接口继续使用 `ajax` 模式。
 
-## GitLab CI 镜像发布
+## GitHub Actions 镜像发布
 
-`.gitlab-ci.yml` 沿用 CPA-Helper 的发布方式，并已接管原 `dnsmgr-docker` 项目的构建职责：
+镜像构建职责已全部迁移到 GitHub Actions，helper 仓库不再代为构建 dnsmgr。每次推送 `main` 都会在原生 `linux/amd64`、`linux/arm64` Runner 上执行容器化校验；只有根目录 `VERSION` 变化且尚未存在同名标签时，才发布生产镜像并创建 GitHub tag/release。
 
-- 在 `debian-x86_64` Runner 上执行示例配置校验、类型检查、测试和构建；
-- 分别在 `debian-x86_64`、`debian-aarch64` Runner 上构建并推送 helper 和 dnsmgr 架构镜像；
-- helper 发布为 `registry.hanada.info/hanada/dnsmgr-helper:${VERSION}` 和 `latest`；
-- dnsmgr 发布为 `registry.hanada.info/hanada/dnsmgr:${DNSMGR_VERSION}` 和 `latest`；
-- 只在 `main` 或 `ext` 分支发布镜像，其他分支和合并请求只执行验证。
+发布目标包括：
 
-GitLab 项目需要提供受保护的 `HARBOR_USERNAME`、`HARBOR_PASSWORD` 变量。helper 发布版本读取根目录 `VERSION`，并由 Docker 构建检查它与 `package.json` 的 `version` 完全一致；dnsmgr 发布版本读取 `docker/dnsmgr/VERSION`。原 `dnsmgr-docker` 的 Dockerfile、入口脚本及运行配置现由 `docker/dnsmgr/` 维护，默认从 `HanadaLee/dnsmgr` 的 `ext` 分支构建，也可以通过 `DNSMGR_REPOSITORY` 和 `DNSMGR_REF` 构建参数覆盖源码仓库及分支。
+- `registry.hanada.info/hanada/dnsmgr-helper:${VERSION}` 与 `latest`；
+- `docker.io/hanadalee/dnsmgr-helper:${VERSION}` 与 `latest`；
+- `ghcr.io/hanadalee/dnsmgr-helper:${VERSION}` 与 `latest`。
 
-本地构建 dnsmgr 镜像使用：
-
-```powershell
-docker build -t dnsmgr:local docker/dnsmgr
-```
+GitHub 仓库需要配置 `HARBOR_USERNAME`、`HARBOR_PASSWORD`、`DOCKERHUB_USERNAME`、`DOCKERHUB_PASSWORD`；GHCR 使用仓库自动提供的 `GITHUB_TOKEN`。`VERSION` 必须与 `package.json` 完全一致。dnsmgr 镜像已由 [dnsmgr](https://github.com/HanadaLee/dnsmgr) 仓库自身的工作流构建和发布。
 
 ## HTTP 路径
 
