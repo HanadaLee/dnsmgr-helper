@@ -1,6 +1,6 @@
 # dnsmgr-helper
 
-`dnsmgr-helper` 是原版 dnsmgr 的独立兼容 BFF。它现在可以完整接管 CAS 登录、CAS Ticket 验证、helper Session、dnsmgr 托管登录和缺失用户自动创建；OpenResty 只需要反向代理，不再执行 SSO Lua。
+`dnsmgr-helper` 是原版 dnsmgr 的独立兼容 BFF，负责 CAS 登录、CAS Ticket 验证、helper Session、dnsmgr 托管登录和缺失用户自动创建。
 
 当前业务接口仍通过原 dnsmgr 控制器读取数据，因此 DNS 平台权限和供应商差异继续由原系统处理。数据库连接是可选基础能力，尚未替代现有域名与解析记录适配器。
 
@@ -165,7 +165,7 @@ helper 访问原 dnsmgr 时会分别输出 `dnsmgr upstream request` 和 `dnsmgr
 
 ## GitHub Actions 镜像发布
 
-镜像构建职责已全部迁移到 GitHub Actions，helper 仓库不再代为构建 dnsmgr。每次推送 `main` 都会在原生 `linux/amd64`、`linux/arm64` Runner 上执行容器化校验；当前 `VERSION` 尚无同名标签时，才发布生产镜像并创建 GitHub tag/release。
+每次推送 `main` 都会由 GitHub Actions 在原生 `linux/amd64`、`linux/arm64` Runner 上执行容器化校验；当前 `VERSION` 尚无同名标签时，才发布生产镜像并创建 GitHub tag/release。
 
 发布目标包括：
 
@@ -217,8 +217,6 @@ GitHub 仓库需要配置 `HARBOR_USERNAME`、`HARBOR_PASSWORD`、`DOCKERHUB_USE
 | `POST` | `/api/web/v1/actions/:operationId` | 执行白名单中的 dnsmgr 操作并转换响应 |
 
 账户、域名、分类、解析记录和证书管理的完整路径、请求字段及示例见 [Web API 文档](docs/web-api.md)。操作入口只接受注册在 v1051 适配器中的固定操作，不接受任意上游 URL。请求体由 `path` 与 `form` 两部分组成；`path` 只填充注册路径中的正整数参数，`form` 会转换成 ThinkPHP/jQuery 兼容的 URL 编码表单。当前操作目录覆盖 142 个原版服务端列表与动作入口，完整功能对应关系见 [迁移矩阵](docs/migration-matrix.md)。
-
-OpenResty 的无认证融合方式和迁移顺序见 [docs/openresty-sso.md](docs/openresty-sso.md)。
 
 ## 验证
 
