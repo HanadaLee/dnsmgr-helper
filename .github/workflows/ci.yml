@@ -31,9 +31,6 @@ jobs:
       - name: Read version
         id: version
         shell: bash
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           version="$(tr -d '[:space:]' < VERSION)"
@@ -51,21 +48,9 @@ jobs:
           release_needed=false
           if git rev-parse -q --verify "refs/tags/${version}" >/dev/null; then
             echo "Version ${version} is already tagged; running tests only."
-          elif [[ "$EVENT_NAME" == "push" &&
-                  -n "$BEFORE_SHA" &&
-                  "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
-            if ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-              git fetch --no-tags origin "$BEFORE_SHA" || true
-            fi
-            previous_version="$(git show "${BEFORE_SHA}:VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
-            previous_version="${previous_version#v}"
-            if [[ "$version" != "$previous_version" ]]; then
-              release_needed=true
-            else
-              echo "Version remains ${version}; running tests only."
-            fi
           else
             release_needed=true
+            echo "Version ${version} is not tagged; publishing or retrying its release."
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"

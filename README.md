@@ -165,7 +165,7 @@ helper 访问原 dnsmgr 时会分别输出 `dnsmgr upstream request` 和 `dnsmgr
 
 ## GitHub Actions 镜像发布
 
-镜像构建职责已全部迁移到 GitHub Actions，helper 仓库不再代为构建 dnsmgr。每次推送 `main` 都会在原生 `linux/amd64`、`linux/arm64` Runner 上执行容器化校验；只有根目录 `VERSION` 变化且尚未存在同名标签时，才发布生产镜像并创建 GitHub tag/release。
+镜像构建职责已全部迁移到 GitHub Actions，helper 仓库不再代为构建 dnsmgr。每次推送 `main` 都会在原生 `linux/amd64`、`linux/arm64` Runner 上执行容器化校验；当前 `VERSION` 尚无同名标签时，才发布生产镜像并创建 GitHub tag/release。
 
 发布目标包括：
 
