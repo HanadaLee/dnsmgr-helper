@@ -882,6 +882,7 @@ export type AxisNowRule = {
   name?: string
   description?: string
   status: 'active' | 'paused'
+  autoPauseOnEmpty: boolean
   strategy?: string
   poolSummary?: string
   poolGroups: AxisNowRulePoolGroup[]

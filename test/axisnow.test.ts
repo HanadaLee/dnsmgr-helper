@@ -96,6 +96,7 @@ describe('typed AxisNow API', () => {
           geo_isp: 'isp/china-telecom',
           geo_isp_name: '中国电信',
           status: 'active',
+          auto_pause_on_empty: true,
           strategy: 'quality_optimized',
           pool_summary: '1 个 EIP',
           pool_groups: [{ type: 'eip', type_name: 'EIP', count: 1, items: ['192.0.2.10'] }],
@@ -123,6 +124,7 @@ describe('typed AxisNow API', () => {
           type: 'A',
           geo_isp: 'isp/china-telecom',
           status: 'paused',
+          auto_pause_on_empty: true,
           action: { conf: { response_strategy: { election_strategy: 'random', ip_quantity: 1 } } },
         } })
       }
@@ -175,6 +177,7 @@ describe('typed AxisNow API', () => {
       data: [{
         uuid: ruleUuid,
         geoIspName: '中国电信',
+        autoPauseOnEmpty: true,
         poolSummary: '1 个 EIP',
         poolAddressCount: 2,
         poolGroups: [{ type: 'eip', typeName: 'EIP', count: 1, items: ['192.0.2.10'] }],
@@ -194,7 +197,7 @@ describe('typed AxisNow API', () => {
     })
 
     const rule = await app.inject({ method: 'GET', url: `/api/web/v1/axisnow/accounts/${accountId}/domains/${domainUuid}/rules/${ruleUuid}`, headers })
-    expect(rule.json()).toMatchObject({ code: 'OK', data: { uuid: ruleUuid, status: 'paused' } })
+    expect(rule.json()).toMatchObject({ code: 'OK', data: { uuid: ruleUuid, status: 'paused', autoPauseOnEmpty: true } })
 
     const created = await app.inject({ method: 'POST', url: '/api/web/v1/axisnow/domains', headers, payload: {
       accountId,
@@ -226,6 +229,57 @@ describe('typed AxisNow API', () => {
     } })
     expect(renamed.statusCode).toBe(422)
     expect(mutations).toEqual(['/internal/axisnow/domains/create', '/internal/axisnow/domains/update'])
+  })
+
+  it('passes the automatic empty-pool pause setting through rule mutations', async () => {
+    const received: Record<string, string>[] = []
+    const app = await appWith((url, init) => {
+      if (url.pathname !== '/internal/axisnow/rules/save') throw new Error(`unexpected upstream route: ${url.pathname}`)
+      received.push(Object.fromEntries(form(init)))
+      return json({ code: 0, msg: '路由规则保存成功' })
+    })
+    const payload = {
+      geoIsp: 'default',
+      description: null,
+      status: 'active',
+      autoPauseOnEmpty: true,
+      poolType: 'all_valid_eips',
+      poolValues: [],
+      advancedPool: null,
+      electionStrategy: 'random',
+      quantity: 1,
+      triggerInterval: 5,
+      ttl: 0,
+      edgeProbeTemplateUuid: null,
+    }
+
+    const created = await app.inject({
+      method: 'POST',
+      url: `/api/web/v1/axisnow/accounts/${accountId}/domains/${domainUuid}/rules`,
+      headers,
+      payload,
+    })
+    const updated = await app.inject({
+      method: 'PUT',
+      url: `/api/web/v1/axisnow/accounts/${accountId}/domains/${domainUuid}/rules/${ruleUuid}`,
+      headers,
+      payload: { ...payload, autoPauseOnEmpty: false },
+    })
+
+    expect(created.json()).toEqual({ code: 'OK', message: '路由规则保存成功' })
+    expect(updated.json()).toEqual({ code: 'OK', message: '路由规则保存成功' })
+    expect(received).toHaveLength(2)
+    expect(received[0]).toMatchObject({
+      account_id: String(accountId),
+      domain_uuid: domainUuid,
+      auto_pause_on_empty: '1',
+    })
+    expect(received[1]).toMatchObject({
+      uuid: ruleUuid,
+      account_id: String(accountId),
+      domain_uuid: domainUuid,
+      auto_pause_on_empty: '0',
+    })
   })
 
   it('covers shared EIP visibility, tag editing and array mutation forms', async () => {
