@@ -25,19 +25,31 @@
     "callbackPath": "/cas/callback",
     "logoutPath": "/cas/logout",
     "logoutRedirectPath": "/",
-    "sessionCookie": "dnsmgr_helper_session",
-    "sessionSecret": "",
-    "sessionTtlSeconds": 604800,
     "requestTimeoutMs": 15000,
-    "cookieSecure": true,
-    "cookieSameSite": "lax",
-    "cookieDomain": "",
     "attributes": {
       "user": "user",
       "email": "email",
       "displayName": "displayName",
       "avatar": "avatar"
     }
+  },
+  "oidc": {
+    "enabled": false,
+    "issuer": "https://id.example.com",
+    "clientId": "",
+    "clientSecret": "",
+    "logoutUrl": "",
+    "usernameClaim": "preferred_username",
+    "requestTimeoutMs": 15000
+  },
+  "auth": {
+    "requiredProvider": "any",
+    "sessionCookie": "dnsmgr_helper_session",
+    "sessionSecret": "",
+    "sessionTtlSeconds": 604800,
+    "cookieSecure": true,
+    "cookieSameSite": "lax",
+    "cookieDomain": ""
   },
   "database": {
     "enabled": false,

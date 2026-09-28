@@ -158,6 +158,7 @@ describe('service and static configuration', () => {
         service: 'dnsmgr-helper',
         adapter: 'v1051',
         casEnabled: true,
+        oidcEnabled: false,
         databaseEnabled: false,
       },
     })

@@ -1,6 +1,7 @@
 import helmet from '@fastify/helmet'
 import formbody from '@fastify/formbody'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
+import { decodeJwt } from 'jose'
 import { z } from 'zod'
 
 import {
@@ -241,7 +242,8 @@ import {
   updateUser,
 } from './adapters/v1051/users.js'
 import { casLoginUrl, casLogoutUrl, CasClient, safeReturnTo } from './auth/cas-client.js'
-import { createCasSession, createDomainSession, verifyCasSession } from './auth/cas.js'
+import { createCasSession, createDomainSession, createOidcSession, verifyCasSession } from './auth/cas.js'
+import { OIDC_LOGOUT_COOKIE, OIDC_STATE_COOKIE, OIDC_TOKEN_COOKIE, SIGNED_OUT_COOKIE, OidcClient } from './auth/oidc-client.js'
 import { cookieValues, serializeHttpOnlyCookie } from './auth/cookies.js'
 import { LegacySsoService } from './auth/legacy-sso.js'
 import { loadConfig, type AppConfig } from './config.js'
@@ -264,7 +266,7 @@ export function requestUrlForLog(rawUrl: string | undefined): string {
   const queryAt = rawUrl.indexOf('?')
   const pathname = queryAt === -1 ? rawUrl : rawUrl.slice(0, queryAt)
   if (pathname === '/quicklogin' && queryAt !== -1) return '/quicklogin?[redacted]'
-  return rawUrl.replace(/([?&]ticket=)[^&]*/gi, '$1[redacted]')
+  return rawUrl.replace(/([?&](?:ticket|code|state|id_token)=)[^&]*/gi, '$1[redacted]')
 }
 
 function requestLogSerializer(request: FastifyRequest) {
@@ -283,6 +285,7 @@ const CallbackQuerySchema = z.object({
   ticket: z.string().trim().min(1).max(2048),
   returnTo: z.string().optional(),
 })
+const OidcCallbackQuerySchema = z.object({ code: z.string().trim().min(1).max(8192), state: z.string().min(1).max(2048) })
 const DomainIdParamsSchema = z.object({ domainId: z.coerce.number().int().positive() })
 const UserIdParamsSchema = z.object({ userId: z.coerce.number().int().positive() })
 const PublicApiIdParamsSchema = z.object({ id: z.coerce.number().int().positive() })
@@ -363,9 +366,9 @@ function isDomainLoginRedirect(location: string | undefined): boolean {
 function cookieOptions(config: AppConfig, maxAge: number) {
   return {
     maxAge,
-    secure: config.cas.cookieSecure,
-    sameSite: config.cas.cookieSameSite,
-    ...(config.cas.cookieDomain ? { domain: config.cas.cookieDomain } : {}),
+    secure: config.auth.cookieSecure,
+    sameSite: config.auth.cookieSameSite,
+    ...(config.auth.cookieDomain ? { domain: config.auth.cookieDomain } : {}),
   }
 }
 
@@ -379,9 +382,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   })
   const client = new DnsmgrClient(config, options.fetcher)
   const casClient = new CasClient(config, options.fetcher)
+  const oidcClient = new OidcClient(config, options.fetcher)
   const database = new DatabaseClient(config.database)
   const legacySso = new LegacySsoService(config, client, database)
-  const casProfiles = new WeakMap<object, CasProfile | undefined>()
+  const ssoProfiles = new WeakMap<object, CasProfile | undefined>()
 
   await app.register(helmet, {
     contentSecurityPolicy: false,
@@ -393,6 +397,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   app.addHook('onSend', async (request, reply) => {
     if (request.url.startsWith('/api/')
       || request.url.startsWith('/cas/')
+      || request.url.startsWith('/oidc/')
       || request.url.startsWith('/login')
       || request.url.startsWith('/logout')
       || request.url.startsWith('/quicklogin')) {
@@ -415,8 +420,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
     const verification = await verifyCasSession(request.headers.cookie, config)
     const profile = verification.status === 'valid' ? verification.profile : undefined
-    casProfiles.set(request, profile)
-    if (config.cas.enabled && !profile) {
+    ssoProfiles.set(request, profile)
+    if ((config.cas.enabled || config.oidc.enabled) && !profile) {
       request.log.warn({
         casSessionStatus: verification.status,
         helperSessionCookieCount: verification.candidateCount,
@@ -424,7 +429,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
           cookieValues(request.headers.cookie, DNSMGR_BRIDGE_COOKIE).length > 0,
         legacySessionCookiePresent:
           cookieValues(request.headers.cookie, DNSMGR_SESSION_COOKIE).length > 0,
-      }, 'CAS session cookie rejected')
+      }, 'SSO session cookie rejected')
       throw authenticationError(config, 'helper-session')
     }
   })
@@ -435,6 +440,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       service: 'dnsmgr-helper',
       adapter: `v${ADAPTER_VERSION}`,
       casEnabled: config.cas.enabled,
+      oidcEnabled: config.oidc.enabled,
       databaseEnabled: database.enabled,
     },
   }))
@@ -490,9 +496,59 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     },
   }))
 
-  const loginHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+  const issueSession = async (request: FastifyRequest, reply: FastifyReply, profile: CasProfile, method: 'cas' | 'oidc', returnTo: string) => {
+    const legacyToken = await legacySso.loginOrRegister(profile, upstreamRequestMetadata(request))
+    const helperSession = method === 'cas'
+      ? await createCasSession(profile, config)
+      : await createOidcSession(profile, config)
+    const age = config.auth.sessionTtlSeconds
+    reply.header('set-cookie', [
+      serializeHttpOnlyCookie(SIGNED_OUT_COOKIE, '', cookieOptions(config, 0)),
+      serializeHttpOnlyCookie(OIDC_TOKEN_COOKIE, '', cookieOptions(config, 0)),
+      serializeHttpOnlyCookie(config.auth.sessionCookie, helperSession, cookieOptions(config, age)),
+      serializeHttpOnlyCookie(DNSMGR_BRIDGE_COOKIE, legacyToken, cookieOptions(config, age)),
+      serializeHttpOnlyCookie(DNSMGR_SESSION_COOKIE, legacyToken, cookieOptions(config, age)),
+    ])
+    return redirect(reply, returnTo)
+  }
+
+  const casLoginHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (config.auth.requiredProvider === 'oidc') throw new ApiError(403, 'AUTH_METHOD_REQUIRED', '当前站点要求使用 OIDC 登录')
     const query = AuthQuerySchema.parse(request.query)
     return redirect(reply, casLoginUrl(config, safeReturnTo(query.returnTo)).href)
+  }
+
+  const oidcLoginHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (config.auth.requiredProvider === 'cas') throw new ApiError(403, 'AUTH_METHOD_REQUIRED', '当前站点要求使用 CAS 登录')
+    const query = AuthQuerySchema.parse(request.query)
+    const started = await oidcClient.start(safeReturnTo(query.returnTo))
+    reply.header('set-cookie', serializeHttpOnlyCookie(OIDC_STATE_COOKIE, started.stateCookie, cookieOptions(config, 300)))
+    return redirect(reply, started.url.href)
+  }
+
+  const loginHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = AuthQuerySchema.parse(request.query)
+    const returnTo = safeReturnTo(query.returnTo)
+    const signedOut = cookieValues(request.headers.cookie, SIGNED_OUT_COOKIE).includes('1')
+    if (signedOut) {
+      const target = config.auth.requiredProvider === 'cas' || !config.oidc.enabled
+        ? config.cas.loginPath : '/oidc/login'
+      const href = `${target}?${new URLSearchParams({ returnTo })}`
+      return reply.type('text/html; charset=utf-8').send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已退出登录</title></head><body style="font:16px system-ui;background:#f6f8fb;color:#17202a"><main style="max-width:360px;margin:12vh auto;padding:28px;background:white;border-radius:12px"><h1 style="font-size:22px">已退出登录</h1><a href="${href}">重新登录</a></main></body></html>`)
+    }
+    if (config.auth.requiredProvider === 'cas' || (config.cas.enabled && !config.oidc.enabled)) {
+      return redirect(reply, `${config.cas.loginPath}?${new URLSearchParams({ returnTo })}`)
+    }
+    if (config.auth.requiredProvider === 'oidc' || (config.oidc.enabled && !config.cas.enabled)) {
+      return redirect(reply, `/oidc/login?${new URLSearchParams({ returnTo })}`)
+    }
+    if (!config.cas.enabled && !config.oidc.enabled) throw new ApiError(503, 'SSO_DISABLED', '统一登录未启用')
+    const links = [
+      ['OIDC 登录', `/oidc/login?${new URLSearchParams({ returnTo })}`],
+      ['CAS 登录', `${config.cas.loginPath}?${new URLSearchParams({ returnTo })}`],
+    ]
+    const buttons = links.map(([label, href]) => `<a href="${href}" style="display:block;margin:12px 0;padding:12px;border-radius:8px;background:#1677ff;color:white;text-decoration:none;text-align:center">${label}</a>`).join('')
+    return reply.type('text/html; charset=utf-8').send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>选择登录方式</title></head><body style="font:16px system-ui;background:#f6f8fb;color:#17202a"><main style="max-width:360px;margin:12vh auto;padding:28px;background:white;border-radius:12px;box-shadow:0 4px 24px #0001"><h1 style="font-size:22px">登录 dnsmgr</h1><p>请选择统一身份认证方式</p>${buttons}</main></body></html>`)
   }
 
   const callbackHandler = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -507,45 +563,84 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       }
       throw error
     }
-    const legacyToken = await legacySso.loginOrRegister(profile, upstreamRequestMetadata(request))
-    const helperSession = await createCasSession(profile, config)
-    const sessionMaxAge = config.cas.sessionTtlSeconds
-
-    reply.header('set-cookie', [
-      serializeHttpOnlyCookie(
-        config.cas.sessionCookie,
-        helperSession,
-        cookieOptions(config, sessionMaxAge),
-      ),
-      serializeHttpOnlyCookie(
-        DNSMGR_BRIDGE_COOKIE,
-        legacyToken,
-        cookieOptions(config, sessionMaxAge),
-      ),
-      serializeHttpOnlyCookie(
-        DNSMGR_SESSION_COOKIE,
-        legacyToken,
-        cookieOptions(config, sessionMaxAge),
-      ),
-    ])
-    return redirect(reply, returnTo)
+    if (config.auth.requiredProvider === 'oidc') throw new ApiError(403, 'AUTH_METHOD_REQUIRED', '当前站点要求使用 OIDC 登录')
+    return issueSession(request, reply, profile, 'cas', returnTo)
   }
 
-  const logoutHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
+  const oidcCallbackHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (config.auth.requiredProvider === 'cas') throw new ApiError(403, 'AUTH_METHOD_REQUIRED', '当前站点要求使用 CAS 登录')
+    const query = OidcCallbackQuerySchema.parse(request.query)
+    const stateCookie = cookieValues(request.headers.cookie, OIDC_STATE_COOKIE)[0]
+    const result = await oidcClient.callback(query.code, query.state, stateCookie)
+    const legacyToken = await legacySso.loginOrRegister(result.profile, upstreamRequestMetadata(request))
+    const helperSession = await createOidcSession(result.profile, config)
+    const age = config.auth.sessionTtlSeconds
+    const sealedToken = await oidcClient.sealIdToken(result.idToken)
     reply.header('set-cookie', [
-      serializeHttpOnlyCookie(config.cas.sessionCookie, '', cookieOptions(config, 0)),
+      serializeHttpOnlyCookie(OIDC_STATE_COOKIE, '', cookieOptions(config, 0)),
+      serializeHttpOnlyCookie(SIGNED_OUT_COOKIE, '', cookieOptions(config, 0)),
+      ...(sealedToken.length < 3500 ? [serializeHttpOnlyCookie(OIDC_TOKEN_COOKIE, sealedToken, cookieOptions(config, age))] : []),
+      serializeHttpOnlyCookie(config.auth.sessionCookie, helperSession, cookieOptions(config, age)),
+      serializeHttpOnlyCookie(DNSMGR_BRIDGE_COOKIE, legacyToken, cookieOptions(config, age)),
+      serializeHttpOnlyCookie(DNSMGR_SESSION_COOKIE, legacyToken, cookieOptions(config, age)),
+    ])
+    return redirect(reply, safeReturnTo(result.returnTo))
+  }
+
+  const logoutHandler = async (request: FastifyRequest, reply: FastifyReply, forcedMethod?: 'cas' | 'oidc') => {
+    const verification = await verifyCasSession(request.headers.cookie, config)
+    const method = forcedMethod ?? (verification.status === 'valid' ? verification.method : undefined)
+    const cleared = [
+      serializeHttpOnlyCookie(config.auth.sessionCookie, '', cookieOptions(config, 0)),
       serializeHttpOnlyCookie(DNSMGR_BRIDGE_COOKIE, '', cookieOptions(config, 0)),
       serializeHttpOnlyCookie(DNSMGR_SESSION_COOKIE, '', cookieOptions(config, 0)),
-    ])
-    if (!config.cas.enabled) return redirect(reply, config.cas.logoutRedirectPath)
-    return redirect(reply, casLogoutUrl(config).href)
+      serializeHttpOnlyCookie(OIDC_STATE_COOKIE, '', cookieOptions(config, 0)),
+      serializeHttpOnlyCookie(OIDC_TOKEN_COOKIE, '', cookieOptions(config, 0)),
+    ]
+    if (method === 'cas' && config.cas.enabled) {
+      reply.header('set-cookie', cleared)
+      return redirect(reply, casLogoutUrl(config).href)
+    }
+    if (method === 'oidc' && config.oidc.enabled) {
+      let logoutUrl: URL | undefined
+      try { logoutUrl = await oidcClient.logoutUrl() } catch { /* Local logout still succeeds. */ }
+      if (logoutUrl) {
+        const stateToken = await oidcClient.logoutState()
+        const state = decodeJwt(stateToken).state
+        logoutUrl.searchParams.set('client_id', config.oidc.clientId!)
+        const idToken = await oidcClient.openIdToken(cookieValues(request.headers.cookie, OIDC_TOKEN_COOKIE)[0])
+        if (idToken) logoutUrl.searchParams.set('id_token_hint', idToken)
+        logoutUrl.searchParams.set('post_logout_redirect_uri', new URL('/oidc/logged-out', config.server.publicUrl).href)
+        logoutUrl.searchParams.set('state', String(state))
+        cleared.push(serializeHttpOnlyCookie(OIDC_LOGOUT_COOKIE, stateToken, cookieOptions(config, 300)))
+        reply.header('set-cookie', cleared)
+        return redirect(reply, logoutUrl.href)
+      }
+    }
+    reply.header('set-cookie', method === 'oidc'
+      ? [...cleared, serializeHttpOnlyCookie(SIGNED_OUT_COOKIE, '1', cookieOptions(config, 300))]
+      : cleared)
+    return redirect(reply, config.cas.logoutRedirectPath)
   }
 
-  app.get(config.cas.loginPath, loginHandler)
+  app.get(config.cas.loginPath, casLoginHandler)
   app.get(config.cas.callbackPath, callbackHandler)
-  app.get(config.cas.logoutPath, logoutHandler)
+  app.get(config.cas.logoutPath, (request, reply) => logoutHandler(request, reply, 'cas'))
+  app.get('/oidc/login', oidcLoginHandler)
+  app.get('/oidc/callback', oidcCallbackHandler)
+  app.get('/oidc/logout', (request, reply) => logoutHandler(request, reply, 'oidc'))
+  app.get('/oidc/logged-out', async (request, reply) => {
+    const query = z.object({ state: z.string().min(1) }).parse(request.query)
+    const token = cookieValues(request.headers.cookie, OIDC_LOGOUT_COOKIE)[0]
+    if (!await oidcClient.verifyLogoutState(token, query.state)) throw new ApiError(401, 'OIDC_STATE_INVALID', 'OIDC 退出状态无效')
+    reply.header('set-cookie', [
+      serializeHttpOnlyCookie(OIDC_LOGOUT_COOKIE, '', cookieOptions(config, 0)),
+      serializeHttpOnlyCookie(SIGNED_OUT_COOKIE, '1', cookieOptions(config, 300)),
+    ])
+    return redirect(reply, '/?signed_out=1')
+  })
   if (config.cas.loginPath !== '/login') app.get('/login', loginHandler)
-  if (config.cas.logoutPath !== '/logout') app.get('/logout', logoutHandler)
+  if (config.cas.logoutPath !== '/logout') app.get('/logout', (request, reply) => logoutHandler(request, reply))
 
   const publicApiContext = (request: FastifyRequest) => upstreamRequestMetadata(request)
   const relayPublicApi = async (
@@ -588,7 +683,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       ? upstreamCookieValue(result, DNSMGR_SESSION_COOKIE)
       : undefined
     if (legacyToken) {
-      const maxAge = config.cas.sessionTtlSeconds
+      const maxAge = config.auth.sessionTtlSeconds
       const cookies = [
         serializeHttpOnlyCookie(
           DNSMGR_BRIDGE_COOKIE,
@@ -601,9 +696,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
           cookieOptions(config, maxAge),
         ),
       ]
-      if (config.cas.enabled) {
+      if (config.cas.enabled || config.oidc.enabled) {
         cookies.unshift(serializeHttpOnlyCookie(
-          config.cas.sessionCookie,
+          config.auth.sessionCookie,
           await createDomainSession(domain, config),
           cookieOptions(config, maxAge),
         ))
@@ -626,7 +721,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   app.get('/api/web/v1/session', async (request) => {
     const context = upstreamContext(request, config)
     const upstream = await client.getHtml('/', context)
-    const casProfile = casProfiles.get(request)
+    const casProfile = ssoProfiles.get(request)
     return {
       code: 'OK',
       data: sessionFromUpstream(upstream, casProfile, config),

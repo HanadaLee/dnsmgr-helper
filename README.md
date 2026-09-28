@@ -1,6 +1,6 @@
 # dnsmgr-helper
 
-`dnsmgr-helper` 是原版 dnsmgr 的独立兼容 BFF，负责 CAS 登录、CAS Ticket 验证、helper Session、dnsmgr 托管登录和缺失用户自动创建。
+`dnsmgr-helper` 是原版 dnsmgr 的独立兼容 BFF，负责 OIDC/CAS 登录、helper Session、dnsmgr 托管登录和缺失用户自动创建。
 
 当前业务接口仍通过原 dnsmgr 控制器读取数据，因此 DNS 平台权限和供应商差异继续由原系统处理。数据库连接是可选基础能力，尚未替代现有域名与解析记录适配器。
 
@@ -8,12 +8,13 @@
 
 ## 已实现能力
 
-- CAS 登录、回调、退出和签名 Session Cookie
-- 使用 CAS 用户名和托管密码登录原 dnsmgr
+- OIDC 授权码 + PKCE 登录、CAS Ticket 登录、回调、退出和签名 Session Cookie
+- 两种登录方式按同一 dnsmgr 用户名共享账户、权限和历史数据
+- 使用统一身份认证用户名和托管密码登录原 dnsmgr
 - 用户不存在时使用配置的管理员创建用户，然后重试登录
 - 浏览器同时获得 helper Session、helper 专用桥接 Cookie 和原 `user_token`
 - API 优先从桥接 Cookie 读取原站令牌，再翻译为上游 `user_token`，不会受同名历史 Cookie 干扰
-- CAS 可关闭；关闭后 API 仅依赖已有的原 dnsmgr Cookie
+- OIDC 与 CAS 可分别启用，也可强制其中一种方式；两者都关闭时 API 仅依赖已有的原 dnsmgr Cookie
 - 可选 MySQL/MariaDB 连接池以及 `/readyz` 实际连通性检查
 - 域名账户列表脱敏、供应商动态字段、编辑回填、增删改和供应商域名发现
 - 域名、分类、解析记录及高级解析的稳定类型化读写 API
@@ -44,13 +45,18 @@ npm run config:check -- config/dnsmgr-helper.json
 
 `config/dnsmgr-helper.json` 已被 Git 忽略。进程默认读取该文件；如果部署系统使用其他位置，只需要用 `DNSMGR_HELPER_CONFIG` 指定配置文件路径。
 
-### CAS 配置
+### 统一登录配置
 
-当 `cas.enabled` 为 `true` 时必须填写：
+`cas.enabled` 和 `oidc.enabled` 可独立开启。两者都开启时，`/login` 显示登录方式选择页；`auth.requiredProvider` 设为 `"cas"` 或 `"oidc"` 时只允许该方式，`"any"` 则允许两种方式。切换为强制某种方式后，另一种方式签发的现有 helper Session 会被拒绝，用户须重新登录。
 
-- `server.publicUrl`：浏览器访问 dnsmgr 的公开站点根地址
-- `cas.baseUrl`：CAS 应用根地址，helper 会追加 `login`、`serviceValidate` 和 `logout`
-- `cas.sessionSecret`：至少 32 个字符的随机密钥，只由 helper 使用
+- `server.publicUrl`：浏览器访问 dnsmgr 的公开站点根地址；OIDC 回调固定为 `${server.publicUrl}oidc/callback`，退出回调为 `${server.publicUrl}oidc/logged-out`，须在身份服务的客户端配置中登记。
+- `cas.baseUrl`：启用 CAS 时必填，helper 会追加 `login`、`serviceValidate` 和 `logout`。
+- `oidc.issuer`、`oidc.clientId`、`oidc.clientSecret`：启用 OIDC 时必填。issuer 须支持 OIDC Discovery 和 JWKS；生产环境必须使用 HTTPS。
+- `auth.sessionSecret`：启用任一方式时必填，至少 32 个字符的随机密钥；`auth.sessionCookie`、有效期和 Cookie 属性由两种方式共用。
+- `oidc.usernameClaim`：映射到 dnsmgr 用户名的 ID Token/UserInfo 字段，默认 `preferred_username`。身份服务中的 CAS 用户名与此字段必须一致，才能互通同一个 dnsmgr 用户；不会用邮箱或显示名称自动合并账户。
+- `oidc.logoutUrl`：可选；不填时使用 Discovery 的 `end_session_endpoint`，不可用时仅退出本地会话。
+
+OIDC 使用授权码、PKCE、state、nonce 和签名 ID Token 校验。已部署的 CAS 配置中的 `cas.sessionSecret` 等 Session/Cookie 字段仍可作为兼容回退，但新配置应统一放在 `auth` 下；保留原密钥和 Cookie 名称可避免迁移时让现有 CAS 会话失效。
 
 数据库启用时，helper 会直接创建或读取 dnsmgr 用户并签发 `user_token`，不需要配置管理员用户名或托管密码。只有不启用数据库时，才需要填写 `legacySso.adminUser` 和 `legacySso.managedPassword`，通过原 dnsmgr HTTP 接口完成兼容登录。
 
@@ -58,9 +64,9 @@ npm run config:check -- config/dnsmgr-helper.json
 
 `cas.validationUrl` 可选，用于把服务端验票请求发送到内网地址；浏览器重定向仍使用公开的 `cas.baseUrl`。如内网地址需要指定 Host，可填写 `cas.validationHost`。
 
-`cas.enabled=false` 时，helper 不签发或校验 CAS Session，`/cas/login` 会明确返回 `CAS_DISABLED`，业务 API 只把现有 `user_token` 交给原 dnsmgr 验证。
+`cas.enabled=false` 时不能使用 `/cas/login`；若同时强制 OIDC，该入口返回 `AUTH_METHOD_REQUIRED`，否则返回 `CAS_DISABLED`。只有 CAS 和 OIDC 都关闭时，业务 API 才仅把现有 `user_token` 交给原 dnsmgr 验证。
 
-前端只使用稳定入口 `/login` 和 `/logout`。helper 内部的 CAS 路径仍可配置，但不会作为前端登录状态接口返回，从而保持认证实现对界面透明。
+前端只使用稳定入口 `/login` 和 `/logout`。helper 根据配置和当前会话选择 OIDC/CAS，不需要前端直接持有身份服务令牌。网关须把 `/oidc/`、`/cas/`、`/login` 和 `/logout` 都转发给 helper；可参考 `deploy/http_dns.hanada.info.conf.example`。
 
 ### 版本检查
 
@@ -184,7 +190,9 @@ GitHub 仓库需要配置 `HARBOR_USERNAME`、`HARBOR_PASSWORD`、`DOCKERHUB_USE
 | `GET` | `/cas/login` | 跳转 CAS 登录 |
 | `GET` | `/cas/callback` | 验证 Ticket、同步 dnsmgr 用户并签发 Cookie |
 | `GET` | `/cas/logout` | 清除三个本地 Cookie 并退出 CAS |
-| `GET` | `/login`、`/logout` | 原 dnsmgr 路径兼容别名 |
+| `GET` | `/oidc/login`、`/oidc/callback` | OIDC 授权码登录、校验 ID Token 并同步同一 dnsmgr 用户 |
+| `GET` | `/oidc/logout`、`/oidc/logged-out` | 清除本地会话并按提供方能力完成单点退出 |
+| `GET` | `/login`、`/logout` | 稳定入口：按配置选择登录方式，并按当前会话退出 |
 | `GET` | `/quicklogin` | 原域名级快速登录入口及受限会话 |
 | `GET` | `/api/web/v1/compatibility` | 适配版本与功能边界 |
 | `GET` | `/api/web/v1/session` | 当前用户、能力和上游版本 |

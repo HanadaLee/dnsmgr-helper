@@ -1,4 +1,4 @@
-# helper 接管 CAS 后的 OpenResty 对接
+# helper 接管 OIDC/CAS 后的 OpenResty 对接
 
 ## 新的职责边界
 
@@ -6,7 +6,8 @@ OpenResty 不再加载或执行站点级 CAS/SSO 逻辑，只负责 TLS、公开
 
 - 生成 CAS 登录和退出地址；
 - 使用回调的 Ticket 调用 `serviceValidate`；
-- 解析 CAS 用户属性并签发 `dnsmgr_helper_session`；
+- 通过 OIDC 授权码与 PKCE 换取并校验 ID Token；
+- 把 CAS 用户名或 OIDC `preferred_username` 映射为同一个 dnsmgr 用户并签发 `dnsmgr_helper_session`；
 - 使用托管密码登录原 dnsmgr；
 - 用户不存在时，用管理员 Cookie 调用原注册控制器；
 - 签发 helper 专用桥接 Cookie，并保留浏览器侧的原 `user_token` 供旧路径兼容；
@@ -14,11 +15,12 @@ OpenResty 不再加载或执行站点级 CAS/SSO 逻辑，只负责 TLS、公开
 
 ```text
 浏览器
-  ├─ /login ───────────────────> dnsmgr-helper ──302──> CAS
+  ├─ /login ───────────────────> dnsmgr-helper ──> OIDC/CAS 选择或强制指定方式
   ├─ /cas/callback?ticket=... ─> dnsmgr-helper
   │                                  ├─ CAS serviceValidate
   │                                  ├─ 原 dnsmgr 登录/必要时注册
   │                                  └─ Set-Cookie: helper Session + bridge Cookie + user_token
+  ├─ /oidc/callback?code=... ─> dnsmgr-helper ──> ID Token 校验 + 同一 dnsmgr 用户
   └─ /api/web/v1/* ────────────> dnsmgr-helper ──> 原 dnsmgr 白名单控制器
 
 OpenResty：只转发以上路径，不解析 Ticket、不签 JWT、不托管用户密码。
@@ -41,7 +43,7 @@ OpenResty：只转发以上路径，不解析 Ticket、不签 JWT、不托管用
 
 以现有 DNS 站点为基础审核并采用完整的 [`deploy/http_dns.hanada.info.conf.example`](../deploy/http_dns.hanada.info.conf.example)：
 
-- `/api/web/v1/`、`/cas/`、`/login`、`/logout` 转发到 helper；
+- `/api/web/v1/`、`/cas/`、`/oidc/`、`/login`、`/logout` 转发到 helper；
 - 原 `/api` 按当前部署约定继续直达 dnsmgr；helper 也保留相同固定公开路径用于独立部署，但网关无需绕行 helper；
 - `/quicklogin`、`/cron`、`/dmtask/status`、`/optimizeip/status` 精确转发到 helper，不能落入前端 SPA；
 - `/setpwd`、`/system/loginset` 不再由网关改写；新前端分别通过个人资料和系统设置 API 提供对应能力。
@@ -50,7 +52,7 @@ helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原
 
 ## 静态配置对应关系
 
-网关不再保存 CAS 密钥或 dnsmgr 托管密码。它们应填写在被 Git 忽略的 `config/dnsmgr-helper.json`：
+网关不保存统一登录密钥或 dnsmgr 托管密码。它们应填写在被 Git 忽略的 `config/dnsmgr-helper.json`：
 
 ```json
 {
@@ -60,7 +62,17 @@ helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原
   },
   "cas": {
     "enabled": true,
-    "baseUrl": "https://cas.example.com/cas/organization/application/",
+    "baseUrl": "https://cas.example.com/cas/organization/application/"
+  },
+  "oidc": {
+    "enabled": true,
+    "issuer": "https://id.example.com",
+    "clientId": "dnsmgr-helper",
+    "clientSecret": "<OIDC 客户端密钥>",
+    "usernameClaim": "preferred_username"
+  },
+  "auth": {
+    "requiredProvider": "any",
     "sessionSecret": "<至少32字符随机值>"
   },
   "database": {
@@ -73,6 +85,8 @@ helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原
 以上只是字段示意，不是完整配置文件。应在完整 JSON 上修改，并运行 `npm run config:check -- config/dnsmgr-helper.json`。
 
 启用数据库后，helper 直接映射 dnsmgr 用户并签发其会话，不需要管理员用户名或托管密码。无数据库部署仍可配置 `legacySso.adminUser` 和 `legacySso.managedPassword` 作为兼容回退。dnsmgr 登录路径、用户创建路径和 Cookie 名称均为固定协议值。
+
+OIDC 客户端需登记 `${server.publicUrl}oidc/callback` 和 `${server.publicUrl}oidc/logged-out`。`auth.requiredProvider` 可设为 `any`、`cas` 或 `oidc`；切换为强制单一方式会使另一种方式的现有 helper Session 失效。旧部署可保留 `cas.sessionSecret` 等 Cookie 字段作为兼容回退，迁移到 `auth` 时应保持原密钥和 Cookie 名称。
 
 ## 无中断迁移顺序
 

@@ -84,6 +84,24 @@ const ConfigSchema = z.object({
     cookieDomain: OptionalCookieDomain,
     attributes: CasAttributesSchema,
   }),
+  oidc: z.object({
+    enabled: z.boolean().default(false),
+    issuer: OptionalUrl,
+    clientId: OptionalNonEmptyString,
+    clientSecret: OptionalNonEmptyString,
+    logoutUrl: OptionalUrl,
+    usernameClaim: z.string().min(1).default('preferred_username'),
+    requestTimeoutMs: z.number().int().min(100).max(300_000).default(15_000),
+  }).default({ enabled: false, usernameClaim: 'preferred_username', requestTimeoutMs: 15_000 }),
+  auth: z.object({
+    requiredProvider: z.enum(['any', 'cas', 'oidc']).default('any'),
+    sessionCookie: CookieName.optional(),
+    sessionSecret: OptionalNonEmptyString,
+    sessionTtlSeconds: z.number().int().min(60).max(31_536_000).optional(),
+    cookieSecure: z.boolean().optional(),
+    cookieSameSite: z.enum(['strict', 'lax', 'none']).optional(),
+    cookieDomain: OptionalCookieDomain,
+  }).default({ requiredProvider: 'any' }),
   legacySso: z.object({
     adminUser: OptionalNonEmptyString,
     managedPassword: OptionalNonEmptyString,
@@ -104,14 +122,23 @@ const ConfigSchema = z.object({
     ssl: z.boolean().default(false),
   }),
 }).superRefine((value, context) => {
-  const authPaths = [value.cas.loginPath, value.cas.callbackPath, value.cas.logoutPath]
-  if (new Set(authPaths).size !== authPaths.length) {
+  const authPaths = [value.cas.loginPath, value.cas.callbackPath, value.cas.logoutPath,
+    '/oidc/login', '/oidc/callback', '/oidc/logout', '/oidc/logged-out']
+  if (new Set(authPaths).size !== authPaths.length
+    || value.cas.callbackPath === '/login' || value.cas.callbackPath === '/logout'
+    || (value.cas.loginPath === '/logout' || value.cas.logoutPath === '/login')
+    || (value.oidc.enabled
+      && (value.cas.loginPath === '/login' || value.cas.logoutPath === '/logout'))) {
     context.addIssue({ code: 'custom', path: ['cas'], message: '登录、回调和退出路径不能重复' })
   }
   const cookieNames = [
-    value.cas.sessionCookie,
+    value.auth.sessionCookie ?? value.cas.sessionCookie,
     DNSMGR_SESSION_COOKIE,
     DNSMGR_BRIDGE_COOKIE,
+    'dnsmgr_helper_oidc_state',
+    'dnsmgr_helper_oidc_logout',
+    'dnsmgr_helper_oidc_token',
+    'dnsmgr_helper_signed_out',
   ]
   if (new Set(cookieNames).size !== cookieNames.length) {
     context.addIssue({
@@ -120,32 +147,61 @@ const ConfigSchema = z.object({
       message: 'CAS Session Cookie 不能与固定的 dnsmgr Cookie 名称重复',
     })
   }
-  if (value.cas.cookieSameSite === 'none' && !value.cas.cookieSecure) {
+  if ((value.auth.cookieSameSite ?? value.cas.cookieSameSite) === 'none'
+    && !(value.auth.cookieSecure ?? value.cas.cookieSecure)) {
     context.addIssue({ code: 'custom', path: ['cas', 'cookieSecure'], message: 'SameSite=None 时必须启用 Secure' })
   }
-  if (!value.cas.enabled) return
+  if (value.oidc.enabled && (value.auth.cookieSameSite ?? value.cas.cookieSameSite) === 'strict') {
+    context.addIssue({ code: 'custom', path: ['auth', 'cookieSameSite'], message: 'OIDC 回调需要 SameSite=Lax 或 None' })
+  }
+  if (value.auth.requiredProvider === 'cas' && !value.cas.enabled) {
+    context.addIssue({ code: 'custom', path: ['auth', 'requiredProvider'], message: '强制 CAS 登录时必须启用 CAS' })
+  }
+  if (value.auth.requiredProvider === 'oidc' && !value.oidc.enabled) {
+    context.addIssue({ code: 'custom', path: ['auth', 'requiredProvider'], message: '强制 OIDC 登录时必须启用 OIDC' })
+  }
+  if (value.oidc.enabled) {
+    if (!value.oidc.issuer || !value.oidc.clientId || !value.oidc.clientSecret) {
+      context.addIssue({ code: 'custom', path: ['oidc'], message: '启用 OIDC 时必须配置 issuer、clientId 和 clientSecret' })
+    }
+    if (value.server.environment === 'production' && value.oidc.issuer && !value.oidc.issuer.startsWith('https://')) {
+      context.addIssue({ code: 'custom', path: ['oidc', 'issuer'], message: '生产环境 OIDC issuer 必须使用 HTTPS' })
+    }
+    if (value.oidc.issuer) {
+      const issuer = new URL(value.oidc.issuer)
+      if (issuer.username || issuer.password || issuer.search || issuer.hash) {
+        context.addIssue({ code: 'custom', path: ['oidc', 'issuer'], message: 'OIDC issuer 不能包含凭据、查询或片段' })
+      }
+    }
+    if (value.oidc.logoutUrl && value.server.environment === 'production'
+      && !value.oidc.logoutUrl.startsWith('https://')) {
+      context.addIssue({ code: 'custom', path: ['oidc', 'logoutUrl'], message: '生产环境 OIDC 退出地址必须使用 HTTPS' })
+    }
+  }
+  if (!value.cas.enabled && !value.oidc.enabled) return
 
-  if (!value.cas.baseUrl) {
+  if (value.cas.enabled && !value.cas.baseUrl) {
     context.addIssue({ code: 'custom', path: ['cas', 'baseUrl'], message: '启用 CAS 时必须配置 baseUrl' })
   }
-  if (!value.cas.sessionSecret || value.cas.sessionSecret.length < 32) {
+  const sessionSecret = value.auth.sessionSecret ?? value.cas.sessionSecret
+  if (!sessionSecret || sessionSecret.length < 32) {
     context.addIssue({
       code: 'custom',
-      path: ['cas', 'sessionSecret'],
-      message: '启用 CAS 时 sessionSecret 至少需要 32 个字符',
+      path: ['auth', 'sessionSecret'],
+      message: '启用统一登录时 sessionSecret 至少需要 32 个字符',
     })
   }
   if (!value.database.enabled && !value.legacySso.adminUser) {
-    context.addIssue({ code: 'custom', path: ['legacySso', 'adminUser'], message: '启用 CAS 时必须配置管理员用户' })
+    context.addIssue({ code: 'custom', path: ['legacySso', 'adminUser'], message: '启用统一登录时必须配置管理员用户' })
   }
   if (!value.database.enabled && !value.legacySso.managedPassword) {
-    context.addIssue({ code: 'custom', path: ['legacySso', 'managedPassword'], message: '启用 CAS 时必须配置托管密码' })
+    context.addIssue({ code: 'custom', path: ['legacySso', 'managedPassword'], message: '启用统一登录时必须配置托管密码' })
   }
 })
 
 type ParsedConfig = z.output<typeof ConfigSchema>
 
-export type AppConfig = Omit<ParsedConfig, 'server' | 'upstream' | 'cas' | 'releaseCheck'> & {
+export type AppConfig = Omit<ParsedConfig, 'server' | 'upstream' | 'cas' | 'oidc' | 'auth' | 'releaseCheck'> & {
   sourcePath?: string
   server: Omit<ParsedConfig['server'], 'publicUrl'> & { publicUrl: URL }
   upstream: Omit<ParsedConfig['upstream'], 'url'> & { url: URL }
@@ -153,6 +209,13 @@ export type AppConfig = Omit<ParsedConfig, 'server' | 'upstream' | 'cas' | 'rele
   cas: Omit<ParsedConfig['cas'], 'baseUrl' | 'validationUrl'> & {
     baseUrl?: URL
     validationUrl?: URL
+  }
+  oidc: Omit<ParsedConfig['oidc'], 'issuer' | 'logoutUrl'> & { issuer?: URL; logoutUrl?: URL }
+  auth: ParsedConfig['auth'] & {
+    sessionCookie: string
+    sessionTtlSeconds: number
+    cookieSecure: boolean
+    cookieSameSite: 'strict' | 'lax' | 'none'
   }
 }
 
@@ -285,6 +348,7 @@ async function mergeThinkphpDatabaseConfig(
 export function parseConfig(input: unknown, sourcePath?: string): AppConfig {
   const parsed = ConfigSchema.parse(input)
   const { baseUrl, validationUrl, ...cas } = parsed.cas
+  const { issuer, logoutUrl, ...oidc } = parsed.oidc
   return {
     ...(sourcePath ? { sourcePath } : {}),
     server: {
@@ -305,6 +369,20 @@ export function parseConfig(input: unknown, sourcePath?: string): AppConfig {
       ...(validationUrl
         ? { validationUrl: normalizedBaseUrl(validationUrl) }
         : {}),
+    },
+    oidc: {
+      ...oidc,
+      ...(issuer ? { issuer: new URL(issuer) } : {}),
+      ...(logoutUrl ? { logoutUrl: new URL(logoutUrl) } : {}),
+    },
+    auth: {
+      ...parsed.auth,
+      sessionCookie: parsed.auth.sessionCookie ?? parsed.cas.sessionCookie,
+      sessionSecret: parsed.auth.sessionSecret ?? parsed.cas.sessionSecret,
+      sessionTtlSeconds: parsed.auth.sessionTtlSeconds ?? parsed.cas.sessionTtlSeconds,
+      cookieSecure: parsed.auth.cookieSecure ?? parsed.cas.cookieSecure,
+      cookieSameSite: parsed.auth.cookieSameSite ?? parsed.cas.cookieSameSite,
+      cookieDomain: parsed.auth.cookieDomain ?? parsed.cas.cookieDomain,
     },
     legacySso: parsed.legacySso,
     database: parsed.database,

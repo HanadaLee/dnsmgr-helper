@@ -14,6 +14,25 @@ afterEach(async () => {
   )))
 })
 
+describe('SSO provider configuration', () => {
+  it('supports OIDC-only login and checks forced provider settings', () => {
+    const base = {
+      server: { environment: 'production', publicUrl: 'https://dns.example.com/' },
+      upstream: { url: 'http://127.0.0.1:19101/' },
+      cas: { enabled: false },
+      oidc: { enabled: true, issuer: 'https://id.example.com', clientId: 'dnsmgr', clientSecret: 'secret' },
+      auth: { sessionSecret: '0123456789abcdef0123456789abcdef', requiredProvider: 'oidc' },
+      database: { enabled: true },
+    }
+    const configured = parseConfig(base)
+    expect(configured.auth).toMatchObject({ requiredProvider: 'oidc', sessionCookie: 'dnsmgr_helper_session' })
+    expect(configured.oidc.issuer?.href).toBe('https://id.example.com/')
+    expect(() => parseConfig({ ...base, auth: { ...base.auth, requiredProvider: 'cas' } })).toThrow()
+    expect(() => parseConfig({ ...base, auth: { ...base.auth, cookieSameSite: 'strict' } })).toThrow()
+    expect(() => parseConfig({ ...base, oidc: { ...base.oidc, issuer: 'http://id.example.com' } })).toThrow()
+  })
+})
+
 describe('ThinkPHP database configuration compatibility', () => {
   it('does not require managed dnsmgr credentials when database access is enabled', () => {
     const config = parseConfig({

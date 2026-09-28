@@ -124,7 +124,7 @@ export class DatabaseClient {
     clientIp = '',
   ): Promise<DnsmgrUserSessionMaterial> {
     if (!this.pool) throw new Error('数据库连接未启用')
-    if (Array.from(username).length > 64) throw new Error('CAS 用户名不能超过 64 个字符')
+    if (Array.from(username).length > 64) throw new Error('统一身份用户名不能超过 64 个字符')
 
     const connection = await this.pool.getConnection()
     try {

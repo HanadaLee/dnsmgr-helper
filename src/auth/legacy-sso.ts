@@ -96,7 +96,7 @@ export class LegacySsoService {
     const result = await this.client.postForm(DNSMGR_REGISTER_PATH, form, context)
     const code = numericCode(requireUpstreamJson(result, this.config))
     if (code !== 0 && code !== -1) {
-      throw new ApiError(502, 'LEGACY_REGISTER_FAILED', '无法在原 dnsmgr 中创建 CAS 用户')
+      throw new ApiError(502, 'LEGACY_REGISTER_FAILED', '无法在原 dnsmgr 中创建统一身份用户')
     }
   }
 
@@ -115,7 +115,7 @@ export class LegacySsoService {
     const firstLogin = await this.login(profile.name, context)
     if (firstLogin.code === 0 && firstLogin.token) return firstLogin.token
     if (firstLogin.code !== -1) {
-      throw new ApiError(502, 'LEGACY_LOGIN_FAILED', 'CAS 用户无法登录原 dnsmgr')
+      throw new ApiError(502, 'LEGACY_LOGIN_FAILED', '统一身份用户无法登录原 dnsmgr')
     }
 
     await this.register(profile, context)

@@ -15,7 +15,7 @@ function optionalClaim(payload: Record<string, unknown>, name: string): string |
 }
 
 function sessionKey(config: AppConfig): Uint8Array | undefined {
-  const secret = config.cas.sessionSecret
+  const secret = config.auth.sessionSecret
   return secret ? new TextEncoder().encode(secret) : undefined
 }
 
@@ -23,17 +23,17 @@ export type CasSessionVerification =
   | { status: 'disabled'; candidateCount: 0 }
   | { status: 'missing'; candidateCount: 0 }
   | { status: 'invalid'; candidateCount: number }
-  | { status: 'valid'; candidateCount: number; profile: CasProfile }
+  | { status: 'valid'; candidateCount: number; profile: CasProfile; method: 'cas' | 'oidc' | 'domain' }
 
 async function createSignedSession(
   profile: CasProfile,
   config: AppConfig,
-  sessionKind: 'cas' | 'domain',
+  sessionKind: 'cas' | 'oidc' | 'domain',
 ): Promise<string> {
   const key = sessionKey(config)
-  if (!config.cas.enabled || !key) throw new Error('CAS Session 未启用')
+  if ((!config.cas.enabled && !config.oidc.enabled) || !key) throw new Error('统一登录 Session 未启用')
 
-  const expiresAt = Math.floor(Date.now() / 1000) + config.cas.sessionTtlSeconds
+  const expiresAt = Math.floor(Date.now() / 1000) + config.auth.sessionTtlSeconds
   return new SignJWT({
     name: profile.name,
     ...(profile.email ? { email: profile.email } : {}),
@@ -55,6 +55,10 @@ export async function createCasSession(profile: CasProfile, config: AppConfig): 
   return createSignedSession(profile, config, 'cas')
 }
 
+export async function createOidcSession(profile: CasProfile, config: AppConfig): Promise<string> {
+  return createSignedSession(profile, config, 'oidc')
+}
+
 export async function createDomainSession(domain: string, config: AppConfig): Promise<string> {
   return createSignedSession({ name: domain, displayName: domain }, config, 'domain')
 }
@@ -64,9 +68,9 @@ export async function verifyCasSession(
   config: AppConfig,
 ): Promise<CasSessionVerification> {
   const key = sessionKey(config)
-  if (!config.cas.enabled || !key) return { status: 'disabled', candidateCount: 0 }
+  if ((!config.cas.enabled && !config.oidc.enabled) || !key) return { status: 'disabled', candidateCount: 0 }
 
-  const candidates = cookieValues(cookieHeader, config.cas.sessionCookie)
+  const candidates = cookieValues(cookieHeader, config.auth.sessionCookie)
   if (candidates.length === 0) return { status: 'missing', candidateCount: 0 }
 
   for (const token of candidates) {
@@ -78,6 +82,12 @@ export async function verifyCasSession(
       })
       const name = optionalClaim(result.payload, 'name')
       if (!name || result.payload.sub !== name) continue
+      const method = result.payload.sessionKind === 'oidc' ? 'oidc'
+        : result.payload.sessionKind === 'domain' ? 'domain' : 'cas'
+      if (method === 'cas' && !config.cas.enabled) continue
+      if (method === 'oidc' && !config.oidc.enabled) continue
+      if (method !== 'domain' && config.auth.requiredProvider !== 'any'
+        && method !== config.auth.requiredProvider) continue
 
       const email = optionalClaim(result.payload, 'email')
       const displayName = optionalClaim(result.payload, 'displayName')
@@ -89,7 +99,7 @@ export async function verifyCasSession(
         ...(avatar ? { avatar } : {}),
       }
 
-      return { status: 'valid', candidateCount: candidates.length, profile }
+      return { status: 'valid', candidateCount: candidates.length, profile, method }
     } catch {
       // A browser can send same-name host-only and domain cookies together.
       // Try every candidate before rejecting the request.
