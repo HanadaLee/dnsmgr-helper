@@ -1,7 +1,7 @@
 {
   "name": "dnsmgr-helper",
   "private": true,
-  "version": "0.8.21",
+  "version": "0.8.22",
   "description": "Compatibility BFF for a stock dnsmgr installation",
   "type": "module",
   "main": "dist/server.js",
@@ -9,6 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "audit:upstream": "tsx scripts/audit-upstream.ts",
     "config:check": "tsx src/config-check.ts",
     "dev": "tsx watch src/server.ts",
     "mock:upstream": "tsx test/fixtures/mock-upstream.ts",

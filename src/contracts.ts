@@ -142,6 +142,7 @@ export type LoginSettings = {
 }
 
 export type NotificationSettings = {
+  qqbot: { appId: string; appSecret: string; webhookUrl: string; bound: boolean }
   email: {
     provider: 'smtp' | 'sendcloud' | 'aliyun'
     smtpServer: string
@@ -227,6 +228,7 @@ export type DomainExpirySettings = {
     email: boolean
     wechat: boolean
     telegram: boolean
+    qqbot: boolean
     robotWebhook: boolean
     customWebhook: boolean
   }
@@ -273,7 +275,7 @@ export type ProviderFieldOption = {
 export type ProviderField = {
   key: string
   label: string
-  control: 'input' | 'textarea' | 'select' | 'radio' | 'checkbox' | 'checkboxes'
+  control: 'input' | 'textarea' | 'select' | 'radio' | 'checkbox' | 'checkboxes' | 'tags'
   required: boolean
   disabled: boolean
   sensitive: boolean
@@ -396,6 +398,7 @@ export type MonitoringOverview = {
     email: boolean
     wechat: boolean
     telegram: boolean
+    qqbot: boolean
     robotWebhook: boolean
     customWebhook: boolean
   }
@@ -632,6 +635,7 @@ export type CertificateSettings = {
     email: CertificateNotificationMode
     wechat: CertificateNotificationMode
     telegram: CertificateNotificationMode
+    qqbot: CertificateNotificationMode
     robotWebhook: CertificateNotificationMode
     customWebhook: CertificateNotificationMode
   }

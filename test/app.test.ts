@@ -642,7 +642,7 @@ describe('v1051 list translation', () => {
       code: 'OK',
       data: {
         reminderDays: [7, 14],
-        notifications: { email: true, wechat: false, telegram: true, robotWebhook: false, customWebhook: true },
+        notifications: { email: true, wechat: false, telegram: true, qqbot: false, robotWebhook: false, customWebhook: true },
       },
     })
 

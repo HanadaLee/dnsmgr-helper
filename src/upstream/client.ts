@@ -25,7 +25,7 @@ export type UpstreamResult = {
 
 export type FetchLike = typeof fetch
 
-type RequestMode = 'ajax' | 'document'
+type RequestMode = 'ajax' | 'document' | 'raw'
 
 function setCookieValues(headers: Headers): string[] {
   const enhancedHeaders = headers as Headers & { getSetCookie?: () => string[] }
@@ -55,6 +55,14 @@ export class DnsmgrClient {
 
   async getHtml(path: string, context: RequestContext): Promise<UpstreamResult> {
     return this.request(path, { method: 'GET' }, context, 'document')
+  }
+
+  async integrationRequest(
+    path: '/mcp' | '/qqbot/webhook',
+    init: RequestInit,
+    context: RequestContext,
+  ): Promise<UpstreamResult> {
+    return this.request(path, init, context, 'raw')
   }
 
   async postForm(
@@ -95,7 +103,7 @@ export class DnsmgrClient {
     if (mode === 'document') {
       headers.set('accept', 'text/html, application/xhtml+xml')
       headers.delete('x-requested-with')
-    } else {
+    } else if (mode === 'ajax') {
       headers.set('accept', 'application/json, text/html;q=0.9')
       headers.set('x-requested-with', 'XMLHttpRequest')
     }

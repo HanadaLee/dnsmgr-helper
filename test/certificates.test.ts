@@ -744,7 +744,7 @@ describe('typed certificate API', () => {
         renewBeforeDays: 14,
         deploymentWindow: { startHour: 1, endHour: 22 },
         notifications: {
-          email: 'all', wechat: 'off', telegram: 'failures-only', robotWebhook: 'all', customWebhook: 'off',
+          email: 'all', wechat: 'off', telegram: 'failures-only', qqbot: 'off', robotWebhook: 'all', customWebhook: 'off',
         },
         localDeployment: {
           defaultTemplateId: 'default',

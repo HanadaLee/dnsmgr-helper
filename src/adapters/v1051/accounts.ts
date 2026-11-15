@@ -11,7 +11,7 @@ import type {
 import { ApiError } from '../../errors.js'
 import type { DnsmgrClient, RequestContext } from '../../upstream/client.js'
 import { requireUpstreamHtml } from '../../upstream/legacy.js'
-import { normalizeFieldOptions } from './dynamic-fields.js'
+import { normalizeDynamicField } from './dynamic-fields.js'
 import { embeddedJsonAssignment, plainText } from './html-state.js'
 import { executeLegacyOperation } from './operations.js'
 
@@ -117,50 +117,8 @@ function providerRemarkMode(value: unknown): 'none' | 'separate' | 'inline' {
   return Number(value) === 1 ? 'separate' : Number(value) === 2 ? 'inline' : 'none'
 }
 
-function sensitiveField(key: string, label: string): boolean {
-  const name = `${key} ${label}`.toLowerCase()
-  return /(secret|password|passwd|token|private|credential|密码|密钥)/.test(name)
-    || /(^|[_\s-])(api[_\s-]?key|sk)([_\s-]|$)/.test(name)
-}
-
 function providerField(key: string, raw: unknown): ProviderField | undefined {
-  const field = objectValue(raw)
-  if (!field || UnsafeKeys.has(key) || !key || key.length > 255) return undefined
-  const control = stringValue(field.type)
-  if (!control || !['input', 'textarea', 'select', 'radio', 'checkbox', 'checkboxes'].includes(control)) {
-    return undefined
-  }
-  const label = plainText(field.name) ?? key
-  const placeholder = plainText(field.placeholder)
-  const note = plainText(field.note)
-  const validator = stringValue(field.validator)
-  const min = numberValue(field.min)
-  const max = numberValue(field.max)
-  const options = normalizeFieldOptions(field.options)
-  let defaultValue: unknown
-  if (Object.hasOwn(field, 'value')) {
-    try {
-      defaultValue = safeJsonValue(field.value, { count: 0 })
-    } catch {
-      defaultValue = undefined
-    }
-  }
-
-  return {
-    key,
-    label,
-    control: control as ProviderField['control'],
-    required: boolValue(field.required),
-    disabled: boolValue(field.disabled),
-    sensitive: sensitiveField(key, label),
-    ...(placeholder ? { placeholder } : {}),
-    ...(note ? { note } : {}),
-    ...(validator ? { validator } : {}),
-    ...(min === undefined ? {} : { min }),
-    ...(max === undefined ? {} : { max }),
-    ...(defaultValue === undefined ? {} : { defaultValue }),
-    ...(options ? { options } : {}),
-  }
+  return normalizeDynamicField(key, raw)
 }
 
 function providerDefinition(type: string, raw: unknown): DnsProviderDefinition | undefined {

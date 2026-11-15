@@ -63,6 +63,7 @@ const CustomWebhookSettingsSchema = z.object({
 }).strict()
 
 export const NotificationSettingsMutationSchema = z.object({
+  qqbot: z.object({ appId: ShortText, appSecret: ShortText }).strict().optional(),
   email: EmailSettingsSchema.optional(),
   wechat: WechatSettingsSchema.optional(),
   telegram: TelegramSettingsSchema.optional(),
@@ -157,7 +158,7 @@ export async function getLoginSettings(
   const html = requireUpstreamHtml(await client.getHtml('/system/loginset', context), config)
   return {
     graphicalVerificationEnabled: elementIdHasAttribute(html, 'input', 'vocde_switch', 'checked'),
-    appliesToCurrentLogin: !config.cas.enabled,
+    appliesToCurrentLogin: !config.cas.enabled && !config.oidc.enabled,
   }
 }
 
@@ -181,6 +182,12 @@ export async function getNotificationSettings(
 ): Promise<NotificationSettings> {
   const html = requireUpstreamHtml(await client.getHtml('/system/noticeset', context), config)
   return {
+    qqbot: {
+      appId: input(html, 'qqbot_appid'),
+      appSecret: input(html, 'qqbot_appsecret'),
+      webhookUrl: new URL('qqbot/webhook', config.server.publicUrl).href,
+      bound: plainText(/<label\b[^>]*>\s*绑定状态\s*<\/label>[\s\S]*?<p\b[^>]*>([\s\S]*?)<\/p>/i.exec(html)?.[1]) === '已绑定',
+    },
     email: {
       provider: emailProvider(selectDefault(html, 'mail_type')),
       smtpServer: input(html, 'mail_smtp'),
@@ -225,6 +232,7 @@ export async function updateNotificationSettings(
 ) {
   const body = NotificationSettingsMutationSchema.parse(rawBody)
   const form: Record<string, unknown> = {}
+  if (body.qqbot) Object.assign(form, { qqbot_appid: body.qqbot.appId, qqbot_appsecret: body.qqbot.appSecret })
   if (body.email) {
     const provider = body.email.provider === 'smtp' ? 0 : body.email.provider === 'sendcloud' ? 1 : 2
     Object.assign(form, {

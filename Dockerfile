@@ -22,6 +22,7 @@ FROM build AS verify
 
 COPY config/dnsmgr-helper.example.json ./config/dnsmgr-helper.example.json
 COPY test/ ./test/
+COPY scripts/ ./scripts/
 RUN npm run config:check -- config/dnsmgr-helper.example.json \
     && npm run typecheck \
     && npm test

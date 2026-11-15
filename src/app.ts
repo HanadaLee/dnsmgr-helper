@@ -253,6 +253,7 @@ import { DNSMGR_BRIDGE_COOKIE, DNSMGR_SESSION_COOKIE } from './dnsmgr-constants.
 import { ApiError, registerErrorHandler } from './errors.js'
 import { upstreamContext, upstreamRequestMetadata } from './request-context.js'
 import { DnsmgrClient, type FetchLike, type UpstreamResult } from './upstream/client.js'
+import { registerIntegrations } from './upstream/integrations.js'
 import { authenticationError } from './upstream/legacy.js'
 
 export type BuildAppOptions = {
@@ -2559,5 +2560,6 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   })
 
   registerErrorHandler(app)
+  await registerIntegrations(app, client, config)
   return app
 }

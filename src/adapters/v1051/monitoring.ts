@@ -148,6 +148,7 @@ export const MonitoringNotificationsSchema = z.object({
   email: z.boolean(),
   wechat: z.boolean(),
   telegram: z.boolean(),
+  qqbot: z.boolean().optional(),
   robotWebhook: z.boolean(),
   customWebhook: z.boolean(),
 }).strict()
@@ -384,6 +385,7 @@ export async function getMonitoringOverview(
       email: notificationValue(html, 'notice_mail'),
       wechat: notificationValue(html, 'notice_wxtpl'),
       telegram: notificationValue(html, 'notice_tgbot'),
+      qqbot: notificationValue(html, 'notice_qqbot'),
       robotWebhook: notificationValue(html, 'notice_webhook'),
       customWebhook: notificationValue(html, 'notice_custom_webhook'),
     },
@@ -532,6 +534,7 @@ export async function updateMonitoringNotifications(
       notice_mail: body.email,
       notice_wxtpl: body.wechat,
       notice_tgbot: body.telegram,
+      ...(body.qqbot === undefined ? {} : { notice_qqbot: body.qqbot }),
       notice_webhook: body.robotWebhook,
       notice_custom_webhook: body.customWebhook,
     },

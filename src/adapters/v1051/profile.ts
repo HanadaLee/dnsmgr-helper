@@ -29,7 +29,7 @@ export const TotpBindSchema = z.object({
 export const LegacyThemeMutationSchema = z.object({ theme: LegacyThemeSchema }).strict()
 
 function requireLocalCredentials(config: AppConfig) {
-  if (config.cas.enabled) {
+  if (config.cas.enabled || config.oidc.enabled) {
     throw new ApiError(409, 'LOCAL_CREDENTIALS_UNAVAILABLE', '当前登录方式不支持修改本地登录凭据')
   }
 }
@@ -39,7 +39,7 @@ export async function getProfileSecurity(
   config: AppConfig,
   context: RequestContext,
 ): Promise<ProfileSecurity> {
-  if (config.cas.enabled) {
+  if (config.cas.enabled || config.oidc.enabled) {
     return { localCredentialsAvailable: false, totpEnabled: false }
   }
   const html = requireUpstreamHtml(await client.getHtml('/setpwd', context), config)

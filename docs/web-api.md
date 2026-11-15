@@ -562,6 +562,15 @@ AxisNow 托管域名提交 `providerSource: "platform"`、所选 `dnsProviderUui
 
 公开 API 同时接受 `application/x-www-form-urlencoded` 和 JSON 对象，再以原表单字段转发 `uid`、`timestamp`、`sign` 及业务参数。签名仍由原 dnsmgr 按 `md5(uid + timestamp + apikey)` 验证，HTTP 状态与原 JSON 正文不转换。`/quicklogin` 保留原令牌验证与跳转语义，并在成功时同步签发域名受限浏览器会话。helper 只登记上述固定路径，不能用它访问任意原站控制器。
 
-## 兼容动作入口
+## 原站新增能力的兼容
+
+- `GET /api/web/v1/system/notifications` 增加 `qqbot`：`appId`、`appSecret`、`webhookUrl`、`bound`。后两项只读；`PUT` 的 `qqbot` 只接受 `appId` 与 `appSecret`，不允许伪造绑定状态。
+- 域名到期提醒、解析监控、证书设置的 `notifications` 增加 `qqbot`。前两者为布尔值，证书通知仍为 `off`、`all`、`failures-only`。旧客户端未提交此字段时保留原设置。
+- 动态表单 `ProviderField.control` 支持 `tags`，任务配置仍提交逗号分隔字符串，不改为 JSON 数组。未知控件显式返回 `UPSTREAM_ADAPTER_MISMATCH`，不得静默省略。
+- 固定公开入口 `/mcp` 与 `/qqbot/webhook` 不使用浏览器登录会话。MCP 保留 Bearer 认证并检查 Origin；QQ 保留 JSON 原文及签名头。认证和签名验证仍由原 dnsmgr 执行，不提供任意路径转发能力。
+
+完整范围与验证边界见 [原站功能兼容审计](upstream-parity-audit.md)。
+
+## 受控动作调用
 
 `GET /actions` 与 `POST /actions/:operationId` 是开发迁移期的受控兜底，只接受 v1051 白名单中的固定动作和动态正整数路径参数。新前端应优先使用本文件中的类型化接口；每完成一个功能域，就不应再依赖该域的通用动作入口。

@@ -16,7 +16,28 @@ env:
   GHCR_IMAGE: ghcr.io/hanadalee/dnsmgr-helper
 
 jobs:
+  upstream-compatibility:
+    name: Audit upstream feature compatibility
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: HanadaLee/dnsmgr
+          ref: ext
+          path: .upstream
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run audit:upstream -- .upstream
+
   build:
+    needs: upstream-compatibility
     name: Test ${{ matrix.platform }}
     strategy:
       fail-fast: false

@@ -45,7 +45,8 @@ OpenResty：只转发以上路径，不解析 Ticket、不签 JWT、不托管用
 
 - `/api/web/v1/`、`/cas/`、`/oidc/`、`/login`、`/logout` 转发到 helper；
 - 原 `/api` 按当前部署约定继续直达 dnsmgr；helper 也保留相同固定公开路径用于独立部署，但网关无需绕行 helper；
-- `/quicklogin`、`/cron`、`/dmtask/status`、`/optimizeip/status` 精确转发到 helper，不能落入前端 SPA；
+- `/quicklogin`、`/cron`、`/dmtask/status`、`/optimizeip/status`、`/mcp`、`/qqbot/webhook` 精确转发到 helper，不能落入前端 SPA；
+- `/mcp` 保留 Authorization，`/qqbot/webhook` 保留原始请求体和 `X-Bot-Appid`、`X-Signature-Timestamp`、`X-Signature-Ed25519`；两者由原站执行 API 密钥或签名验证，不使用浏览器 SSO 跳转；
 - `/setpwd`、`/system/loginset` 不再由网关改写；新前端分别通过个人资料和系统设置 API 提供对应能力。
 
 helper 应继续只监听回环地址，并通过 `upstream.url` 直接访问原 dnsmgr；OpenResty 不再为 helper 提供 legacy 中转路径。

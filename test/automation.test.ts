@@ -140,7 +140,7 @@ describe('typed monitoring API', () => {
         lastError: '网络超时 & 已恢复',
         swooleInstalled: true,
         notifications: {
-          email: true, wechat: false, telegram: true, robotWebhook: false, customWebhook: true,
+          email: true, wechat: false, telegram: true, qqbot: false, robotWebhook: false, customWebhook: true,
         },
       },
     })

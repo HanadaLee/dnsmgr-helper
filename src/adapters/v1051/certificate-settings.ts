@@ -135,6 +135,7 @@ const NotificationsSchema = z.object({
   email: NotificationModeSchema.optional(),
   wechat: NotificationModeSchema.optional(),
   telegram: NotificationModeSchema.optional(),
+  qqbot: NotificationModeSchema.optional(),
   robotWebhook: NotificationModeSchema.optional(),
   customWebhook: NotificationModeSchema.optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, '至少需要提交一项通知设置')
@@ -296,6 +297,7 @@ export async function getCertificateSettings(
       email: notificationMode(namedElementAttribute(html, 'select', 'cert_notice_mail', 'default')),
       wechat: notificationMode(namedElementAttribute(html, 'select', 'cert_notice_wxtpl', 'default')),
       telegram: notificationMode(namedElementAttribute(html, 'select', 'cert_notice_tgbot', 'default')),
+      qqbot: notificationMode(namedElementAttribute(html, 'select', 'cert_notice_qqbot', 'default')),
       robotWebhook: notificationMode(namedElementAttribute(html, 'select', 'cert_notice_webhook', 'default')),
       customWebhook: notificationMode(namedElementAttribute(html, 'select', 'cert_notice_custom_webhook', 'default')),
     },
@@ -325,6 +327,7 @@ export async function updateCertificateSettings(
       ...(notifications?.email === undefined ? {} : { cert_notice_mail: ModeToCode[notifications.email] }),
       ...(notifications?.wechat === undefined ? {} : { cert_notice_wxtpl: ModeToCode[notifications.wechat] }),
       ...(notifications?.telegram === undefined ? {} : { cert_notice_tgbot: ModeToCode[notifications.telegram] }),
+      ...(notifications?.qqbot === undefined ? {} : { cert_notice_qqbot: ModeToCode[notifications.qqbot] }),
       ...(notifications?.robotWebhook === undefined ? {} : { cert_notice_webhook: ModeToCode[notifications.robotWebhook] }),
       ...(notifications?.customWebhook === undefined
         ? {}

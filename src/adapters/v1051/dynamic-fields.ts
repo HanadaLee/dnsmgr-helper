@@ -119,8 +119,8 @@ export function normalizeDynamicField(key: string, raw: unknown): ProviderField 
   const field = objectValue(raw)
   if (!field || UnsafeKeys.has(key) || !key || key.length > 255) return undefined
   const control = stringValue(field.type)
-  if (!control || !['input', 'textarea', 'select', 'radio', 'checkbox', 'checkboxes'].includes(control)) {
-    return undefined
+  if (!control || !['input', 'textarea', 'select', 'radio', 'checkbox', 'checkboxes', 'tags'].includes(control)) {
+    throw new ApiError(502, 'UPSTREAM_ADAPTER_MISMATCH', `原 dnsmgr 字段 ${key} 的控件类型不兼容：${control ?? '(缺失)'}`)
   }
   const label = plainText(field.name) ?? key
   const placeholder = plainText(field.placeholder)
